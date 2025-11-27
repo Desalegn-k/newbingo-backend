@@ -19,10 +19,39 @@ exports.directWithdraw = async (req, res) => {
     if (rows.length === 0)
       return res.status(404).json({ msg: "User not found" });
 
-    const balance = rows[0].main_balance;
+    // const balance = rows[0].main_balance;
+    const balance = Number(rows[0].main_balance);
+    const withdrawAmount = Number(amount);
 
-    if (balance < amount)
-      return res.status(400).json({ msg: "Insufficient balance" });
+    console.log(balance);
+    console.log(amount);
+
+    if (balance < withdrawAmount)
+      return res.status(400).json({
+        msg: `<p style="
+    color: red;
+     background-color:pink;
+     border:solid;
+     border-radius:10px;
+     border-color:red;
+     padding:10px;
+     width:350px;
+      margin-left:15px
+    ">Insufficient Balance</p>`,
+      });
+    if (withdrawAmount < 100)
+      return res.status(400).json({
+        msg: `<p style="
+    color: red;
+     background-color:pink;
+     border:solid;
+     border-radius:10px;
+     border-color:red;
+     padding:10px;
+     width:350px;
+    margin-left:15px
+    ">Minimum withdraw is 100 ETB</p>`,
+      });
 
     // deduct balance
     await db.query(
@@ -39,7 +68,18 @@ exports.directWithdraw = async (req, res) => {
       [ phone, amount, method ]
     );
 
-    return res.json({ msg: "Direct withdraw successful" });
+    return res.json({
+      msg: `<p style="
+    color: green;
+     background-color:lightgreen;
+     border:solid;
+     border-radius:10px;
+     border-color:green;
+     padding:10px;
+     width:76%;
+     margin-left:13px
+    ">Direct withdraw successful,the balance will be added to your account in maximum 2 hours.</p>`,
+    });
   } catch (err) {
     console.log(err);
     return res.status(500).json({ msg: "Server error" });
@@ -109,8 +149,36 @@ exports.verifyManualWithdraw = async (req, res) => {
 
     if (savedOTP != otp) return res.status(400).json({ msg: "Invalid OTP" });
 
-    if (main_balance < amount)
-      return res.status(400).json({ msg: "Insufficient balance" });
+    const balance = Number(rows[0].main_balance);
+    const withdrawAmount = Number(amount);
+
+    if (balance < withdrawAmount)
+      return res.status(400).json({
+        msg: `<p style="
+    color: red;
+     background-color:pink;
+     border:solid;
+     border-radius:10px;
+     border-color:red;
+     padding:10px;
+     width:350px;
+      margin-left:15px
+    ">Insufficient Balance</p`,
+      });
+
+      if (withdrawAmount < 100)
+        return res.status(400).json({
+          msg: `<p style="
+    color: red !important;
+     background-color:pink;
+     border:solid;
+     border-radius:10px;
+     border-color:red;
+     padding:10px;
+     width:90%;
+ 
+    ">Minimum withdraw is 100 ETB</p>`,
+        });
 
     // withdraw
     await db.query(
@@ -118,7 +186,18 @@ exports.verifyManualWithdraw = async (req, res) => {
       [amount, phone]
     );
 
-    return res.json({ msg: "Manual withdraw successful" });
+    return res.json({
+      msg: `<p style="
+    color: green;
+     background-color:lightgreen;
+     border:solid;
+     border-radius:10px;
+     border-color:green;
+     padding:10px;
+     width:76%;
+     margin-left:13px
+    ">Bank withdraw successful,the balance will be added to your account in maximum 2 hours.</p>`,
+    });
   } catch (err) {
     console.log(err);
     return res.status(500).json({ msg: "Server error" });

@@ -34,6 +34,7 @@ router.post("/select-card", verifyToken, bingo.selectCard);
 // Confirm card + deduct balance + start countdown
 router.post("/confirm-card", verifyToken, bingo.confirmCard);
 // router.post("/confirm-card", bingo.confirmCard);
+router.get("/taken/:room_id", bingo.getTakenNumbers);
 
 // Get room state
 router.get("/state", bingo.getRoomState);

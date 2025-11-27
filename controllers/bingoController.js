@@ -165,32 +165,109 @@ exports.joinRoom = async (req, res) => {
 
 //   res.json({ card });
 // };
+
+// it comments after 1-150
+// exports.selectCard = async (req, res) => {
+//   const user_id = req.user.id;
+//   const { room_id } = req.body;
+
+//   try {
+//     // Check if this line is the failure point
+//     const card = generateBingoCard();
+
+//     // Check if this line is the failure point
+//     await db.query(
+//       "UPDATE bingo_players SET card=?, marked=? WHERE room_id=? AND user_id=?",
+//       [JSON.stringify(card), "[]", room_id, user_id]
+//     );
+
+//     res.json({ card });
+//   } catch (error) {
+//     // THIS WILL PRINT THE ERROR TO YOUR SERVER CONSOLE
+//     console.error("Error in selectCard:", error);
+
+//     // Send the error message back to the client for temporary debugging
+//     res
+//       .status(500)
+//       .json({
+//         message: "Server Error during card selection",
+//         error: error.message,
+//       });
+//   }
+// };
+
+// exports.selectCard = async (req, res) => {
+//   const user_id = req.user.id;
+//   const { room_id, card_number } = req.body; // <-- IMPORTANT
+
+//   if (!card_number)
+//     return res.status(400).json({ message: "Card number is required" });
+
+//   try {
+//     // 1. Fetch fixed card from DB
+//     const [rows] = await db.query("SELECT card FROM fixed_cards WHERE id = ?", [
+//       card_number,
+//     ]);
+
+//     if (rows.length === 0)
+//       return res.status(404).json({ message: "Card not found" });
+
+//     const fixedCard = JSON.parse(rows[0].card);
+
+//     // 2. Update bingo_players with selected card
+//     await db.query(
+//       "UPDATE bingo_players SET card=?, marked=? WHERE room_id=? AND user_id=?",
+//       [JSON.stringify(fixedCard), "[]", room_id, user_id]
+//     );
+
+//     res.json({ card: fixedCard });
+//   } catch (error) {
+//     console.error("selectCard error:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
+//for alrady token
 exports.selectCard = async (req, res) => {
   const user_id = req.user.id;
-  const { room_id } = req.body;
+  const { room_id, card_number } = req.body;
+
+  if (!card_number)
+    return res.status(400).json({ message: "Card number is required" });
 
   try {
-    // Check if this line is the failure point
-    const card = generateBingoCard();
-
-    // Check if this line is the failure point
-    await db.query(
-      "UPDATE bingo_players SET card=?, marked=? WHERE room_id=? AND user_id=?",
-      [JSON.stringify(card), "[]", room_id, user_id]
+    // 1️⃣ Check if the card number is already taken by another player
+    const [taken] = await db.query(
+      "SELECT user_id FROM bingo_players WHERE room_id = ? AND selected_number = ?",
+      [room_id, card_number]
     );
 
-    res.json({ card });
-  } catch (error) {
-    // THIS WILL PRINT THE ERROR TO YOUR SERVER CONSOLE
-    console.error("Error in selectCard:", error);
+    if (taken.length > 0) {
+      return res.status(400).json({ message: "Card number already taken!" });
+    }
 
-    // Send the error message back to the client for temporary debugging
-    res
-      .status(500)
-      .json({
-        message: "Server Error during card selection",
-        error: error.message,
-      });
+    // 2️⃣ Fetch fixed card from DB
+    const [rows] = await db.query("SELECT card FROM fixed_cards WHERE id = ?", [
+      card_number,
+    ]);
+
+    if (rows.length === 0)
+      return res.status(404).json({ message: "Card not found" });
+
+    const fixedCard = JSON.parse(rows[0].card);
+
+    // 3️⃣ Update player's selected card and store selected_number
+    await db.query(
+      `UPDATE bingo_players 
+       SET card = ?, marked = ?, selected_number = ? 
+       WHERE room_id = ? AND user_id = ?`,
+      [JSON.stringify(fixedCard), "[]", card_number, room_id, user_id]
+    );
+
+    res.json({ card: fixedCard });
+  } catch (error) {
+    console.error("selectCard error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -209,9 +286,10 @@ exports.confirmCard = async (req, res) => {
     user_id,
   ]);
 
-  
+  const main_balance = Number(user.main_balance);
+  const entry_fee = Number(room.entry_fee);
 
-  if ( !room|| user.main_balance < room.entry_fee) {
+  if (!room || main_balance < entry_fee) {
     return res.status(400).json({ message: "Insufficient balancennn" });
   }
   
@@ -235,6 +313,25 @@ exports.confirmCard = async (req, res) => {
 
   res.json({ message: "Confirmed" });
 };
+
+exports.getTakenNumbers = async (req, res) => {
+  const { room_id } = req.params;
+
+  try {
+    const [rows] = await db.query(
+      "SELECT selected_number FROM bingo_players WHERE room_id = ? AND selected_number IS NOT NULL",
+      [room_id]
+    );
+
+    const taken = rows.map((r) => r.selected_number);
+
+    res.json({ taken });
+  } catch (error) {
+    console.error("getTakenNumbers error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
 // ------------------------------------------------------
 // GET ROOM STATE

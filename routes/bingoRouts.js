@@ -14,6 +14,8 @@ const {verifyadmin}=require("../middleware/verifyAdmin");
 router.post("/create-room", bingo.createRoom);
 router.post("/start", bingo.startCountdown);
 
+router.get("/current-countdown/:room_id", bingo.getCurrentCountdown);
+
 
 // Get all available rooms
 router.get("/rooms", bingo.getAvailableRooms);
@@ -35,12 +37,16 @@ router.post("/select-card", verifyToken, bingo.selectCard);
 router.post("/confirm-card", verifyToken, bingo.confirmCard);
 // router.post("/confirm-card", bingo.confirmCard);
 router.get("/taken/:room_id", bingo.getTakenNumbers);
+router.get("/prize/:roomId", bingo.getPrize);
 
 // Get room state
 router.get("/state", bingo.getRoomState);
 
 // Claim bingo
 router.post("/claim", verifyToken, bingo.claimBingo);
+ 
+
+
 // router.post("/claim", bingo.claimBingo);
 
 module.exports = router;

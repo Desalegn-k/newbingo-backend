@@ -301,20 +301,21 @@ exports.startGameEngine = async (io, room_id) => {
 async function endGame(io, room_id) {
   if (!activeGames[room_id]) return;
 
+  // Stop the countdown timer
   clearTimeout(activeGames[room_id].timer);
   delete activeGames[room_id];
 
-  // Mark room as finished
+  // Mark room as finished in the database
   await db.query("UPDATE bingo_rooms SET status='finished' WHERE id = ?", [
     room_id,
   ]);
 
-  // Notify players that the game ended
-  // io.to(`room_${room_id}`).emit("game_finished", { room_id });
+  // Notify all players in the room that the game has finished
+  io.to(`room_${room_id}`).emit(`room_${room_id}_finished`);
 
-  // get username of winner
-  
+  console.log(`Room ${room_id} finished. Clients notified.`);
 }
+
 
 
 

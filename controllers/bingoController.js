@@ -38,6 +38,7 @@ const engine = require("../socket/engine");
 //   }
 // };
 
+
 exports.createRoom = async (req, res) => {
   try {
     const { room_name, entry_fee = 0, max_players = 100 } = req.body;
@@ -67,7 +68,19 @@ exports.createRoom = async (req, res) => {
 
 exports.getAvailableRooms = async (req, res) => {
   const [rooms] = await db.query(
-    "SELECT * FROM bingo_rooms WHERE status IN ('waiting', 'countdown')"
+    `SELECT b.*
+FROM bingo_rooms b
+JOIN (
+    SELECT entry_fee, MIN(id) AS min_id
+    FROM bingo_rooms
+    WHERE status IN ('waiting', 'countdown', 'started')
+    GROUP BY entry_fee
+) x
+ON b.id = x.min_id
+ORDER BY b.entry_fee ASC;
+
+
+`
   );
   res.json(rooms);
 };
@@ -80,9 +93,8 @@ const countdownIntervals = {};
 
 exports.startCountdown = async (req, res) => {
   try {
-    const { room_id, seconds = 20} = req.body;
+    const { room_id, seconds = 60 } = req.body;
 
-    // DB check
     const [[room]] = await db.query(
       "SELECT status FROM bingo_rooms WHERE id=?",
       [room_id]
@@ -92,8 +104,9 @@ exports.startCountdown = async (req, res) => {
       return res.json({ success: false, msg: "Countdown already started" });
     }
 
-    // Set countdown status in DB
-    await db.query("UPDATE bingo_rooms SET status='countdown' WHERE id=?", [room_id]);
+    await db.query("UPDATE bingo_rooms SET status='countdown' WHERE id=?", [
+      room_id,
+    ]);
 
     const io = req.io;
     io.to(`room_${room_id}`).emit("countdown_started", { seconds });
@@ -104,22 +117,26 @@ exports.startCountdown = async (req, res) => {
       secondsLeft--;
       io.to(`room_${room_id}`).emit("countdown_tick", secondsLeft);
 
+      // Update memory
+      countdownIntervals[room_id].secondsLeft = secondsLeft;
+
       if (secondsLeft <= 0) {
         clearInterval(intervalId);
         delete countdownIntervals[room_id];
 
-        // ✅ Change status to started
-        await db.query("UPDATE bingo_rooms SET status='started' WHERE id=?", [room_id]);
+        await db.query("UPDATE bingo_rooms SET status='started' WHERE id=?", [
+          room_id,
+        ]);
 
         io.to(`room_${room_id}`).emit("countdown_finished", { room_id });
 
-        // ✅ Start the engine AFTER countdown finished
         const engine = require("../socket/engine");
         engine.startGameEngine(io, room_id).catch(console.error);
       }
     }, 1000);
 
-    countdownIntervals[room_id] = intervalId;
+    // Store interval + secondsLeft in memory
+    countdownIntervals[room_id] = { intervalId, secondsLeft };
 
     res.json({ success: true });
   } catch (err) {
@@ -127,6 +144,18 @@ exports.startCountdown = async (req, res) => {
     res.status(500).json({ msg: "Server error" });
   }
 };
+
+// ------------------- NEW API -------------------
+// GET /bingo/current-countdown/:room_id
+exports.getCurrentCountdown = (req, res) => {
+  const { room_id } = req.params;
+  const countdown = countdownIntervals[room_id];
+
+  if (!countdown) return res.json({ status: "waiting", seconds: 0 });
+
+  return res.json({ status: "countdown", seconds: countdown.secondsLeft });
+};
+
 
 
 
@@ -273,11 +302,74 @@ exports.selectCard = async (req, res) => {
 
 // ------------------------------------------------------
 // CONFIRM CARD + START COUNTDOWN
+
+
+
 // ------------------------------------------------------
+// exports.confirmCard = async (req, res) => {
+//   const user_id = req.user.id;
+//   const { room_id } = req.body;
+
+//   // Get entry fee
+//   const [[room]] = await db.query(
+//     "SELECT entry_fee FROM bingo_rooms WHERE id=?",
+//     [room_id]
+//   );
+
+//   if (!room) {
+//     return res.status(400).json({ message: "Room not found" });
+//   }
+
+//   // Get user balance
+//   const [[user]] = await db.query("SELECT main_balance FROM users WHERE id=?", [
+//     user_id,
+//   ]);
+
+//   const main_balance = Number(user.main_balance);
+//   const entryFee = Number(room.entry_fee);
+
+//   if (main_balance < entryFee) {
+//     return res.status(400).json({ message: "Insufficient balance" });
+//   }
+
+//   // Deduct balance
+//   await db.query(
+//     "UPDATE users SET main_balance = main_balance - ? WHERE id=?",
+//     [entryFee, user_id]
+//   );
+
+//   // Count players in the room
+//   const [[{ count: playersCount }]] = await db.query(
+//     "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=?",
+//     [room_id]
+//   );
+
+//   // Prize calculation
+//   const totalPool = entryFee * playersCount;
+//   const platformFee = totalPool * 0.2;
+//   const prize = totalPool - platformFee;
+
+//   // Update prize for this player
+//   await db.query(
+//     "UPDATE bingo_players SET prize=? WHERE room_id=? AND user_id=?",
+//     [prize, room_id, user_id]
+//   );
+
+//   // Notify players + start engine
+//   req.io.to(`room_${room_id}`).emit("countdown_started", { room_id });
+//   engine.startGameEngine(req.io, room_id);
+
+//   res.json({ message: "Confirmed and prize calculated" });
+// };
+
+
+
+
 exports.confirmCard = async (req, res) => {
   const user_id = req.user.id;
   const { room_id } = req.body;
 
+  // 1. Get room & user balance
   const [[room]] = await db.query(
     "SELECT entry_fee FROM bingo_rooms WHERE id=?",
     [room_id]
@@ -290,29 +382,73 @@ exports.confirmCard = async (req, res) => {
   const entry_fee = Number(room.entry_fee);
 
   if (!room || main_balance < entry_fee) {
-    return res.status(400).json({ message: "Insufficient balancennn" });
+    return res.status(400).json({ message: "Insufficient balance" });
   }
-  
- 
 
+  // 2. Deduct entry fee
   await db.query(
     "UPDATE users SET main_balance = main_balance - ? WHERE id=?",
-    [room.entry_fee, user_id]
+    [entry_fee, user_id]
   );
 
-  // Switch to countdown
-  // await db.query("UPDATE bingo_rooms SET status='countdown' WHERE id=?", [
-  //   room_id,
-  // ]);
+  // 3. Count confirmed players for this room
+  const [[{ count: playersCount }]] = await db.query(
+    "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
+    [room_id]
+  );
 
-  // Notify all players
-  req.io.to(`room_${room_id}`).emit("countdown_started", { room_id });
+  // 4. Calculate prize (example: 80% of total pool)
+  const totalPool = entry_fee * (playersCount + 1); // include this player
+  const platformFee = totalPool * 0.2;
+  const prize = totalPool - platformFee;
 
-  // Start engine
-  engine.startGameEngine(req.io, room_id);
+  // 5. Update prize for this player
+  await db.query(
+    "UPDATE bingo_players SET prize=? WHERE room_id=? AND user_id=?",
+    [prize, room_id, user_id]
+  );
 
-  res.json({ message: "Confirmed" });
+  // 6. Emit real-time update to room
+  if (req.io) {
+    req.io.to(`room_${room_id}`).emit(`room_${room_id}_prize_update`, prize);
+  }
+
+  // 7. Optional: start countdown / game engine
+  // engine.startGameEngine(req.io, room_id);
+
+  res.json({ message: "Confirmed", prize });
 };
+
+
+//prize
+
+
+// ---------------------------
+// Get confirmed prize for a room
+exports.getPrize = async (req, res) => {
+  const { roomId } = req.params;
+
+  try {
+    const [rows] = await db.query(
+      "SELECT prize FROM bingo_players WHERE room_id = ? AND prize IS NOT NULL AND prize > 0 LIMIT 1",
+      [roomId]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.json({ prize: 0 });
+    }
+
+    const prize = Number(rows[0].prize) || 0;
+    return res.json({ prize });
+  } catch (err) {
+    console.error("getPrize error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
+
 
 exports.getTakenNumbers = async (req, res) => {
   const { room_id } = req.params;
@@ -336,14 +472,32 @@ exports.getTakenNumbers = async (req, res) => {
 // ------------------------------------------------------
 // GET ROOM STATE
 // ------------------------------------------------------
+// exports.getRoomState = async (req, res) => {
+//   const { room_id } = req.query;
+
+//   const [[room]] = await db.query("SELECT * FROM bingo_rooms WHERE id=?", [
+//     room_id,
+//   ]);
+//   const [players] = await db.query(
+//     "SELECT user_id, card, is_winner FROM bingo_players WHERE room_id=?",
+//     [room_id]
+//   );
+
+//   res.json({ room, players });
+// };
+
+
+// Optional: get room state
 exports.getRoomState = async (req, res) => {
   const { room_id } = req.query;
 
-  const [[room]] = await db.query("SELECT * FROM bingo_rooms WHERE id=?", [
-    room_id,
-  ]);
+  const [[room]] = await db.query(
+    "SELECT * FROM bingo_rooms WHERE id=?",
+    [room_id]
+  );
+
   const [players] = await db.query(
-    "SELECT user_id, card, is_winner FROM bingo_players WHERE room_id=?",
+    "SELECT user_id, card, is_winner, prize FROM bingo_players WHERE room_id=?",
     [room_id]
   );
 
@@ -381,6 +535,6 @@ exports.claimBingo = async (req, res) => {
   );
 
   res.json({
-    message: isWinner ? "Valid Bingo!" : "Invalid Bingo",
+    message: isWinner ? " You WON The Game!" : "Invalid Bingo",
   });
 };

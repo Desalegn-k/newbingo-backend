@@ -8,7 +8,7 @@ const { generateBingoCard } = require("../utils/generateCard");
   try {
     console.log("Generating 100 fixed cards...");
 
-    for (let i = 1; i <= 150; i++) {
+    for (let i = 1; i <= 100; i++) {
       const card = generateBingoCard();
       await db.query("INSERT INTO fixed_cards (id, card) VALUES (?, ?)", [
         i,

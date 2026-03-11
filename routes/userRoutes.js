@@ -13,6 +13,7 @@ const {
   resetPassword,
   updateProfile,
   createAdmin,
+  getAllUsers,
 } = require("../controllers/userController");
 const verifyAdmin = require("../middleware/verifyAdmin");
 
@@ -48,6 +49,8 @@ router.put("/update-profile", verifyToken, updateProfile);
 
 //create admin
 
-router.post("/create-admin", verifyToken, verifyAdmin, createAdmin);
+router.post("/create-admin",   createAdmin);
+// get user list
+router.get("/get-users", getAllUsers);
 
 module.exports = router;

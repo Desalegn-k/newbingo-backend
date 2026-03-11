@@ -10,6 +10,11 @@ router.post(
   verifyToken,verifyAdmin,
   depositController.confirmDeposit
 );
+router.post(
+  "/submit-ref",
+  verifyToken,
+  depositController.submitDepositReference,
+);
 router.get(
   "/admin/transactions",
   verifyToken,

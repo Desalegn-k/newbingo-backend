@@ -93,7 +93,7 @@ const countdownIntervals = {};
 
 exports.startCountdown = async (req, res) => {
   try {
-    const { room_id, seconds = 60 } = req.body;
+    const { room_id, seconds = 20 } = req.body;
 
     const [[room]] = await db.query(
       "SELECT status FROM bingo_rooms WHERE id=?",
@@ -300,121 +300,84 @@ exports.selectCard = async (req, res) => {
   }
 };
 
-// ------------------------------------------------------
-// CONFIRM CARD + START COUNTDOWN
 
-
-
-// ------------------------------------------------------
-// exports.confirmCard = async (req, res) => {
-//   const user_id = req.user.id;
-//   const { room_id } = req.body;
-
-//   // Get entry fee
-//   const [[room]] = await db.query(
-//     "SELECT entry_fee FROM bingo_rooms WHERE id=?",
-//     [room_id]
-//   );
-
-//   if (!room) {
-//     return res.status(400).json({ message: "Room not found" });
-//   }
-
-//   // Get user balance
-//   const [[user]] = await db.query("SELECT main_balance FROM users WHERE id=?", [
-//     user_id,
-//   ]);
-
-//   const main_balance = Number(user.main_balance);
-//   const entryFee = Number(room.entry_fee);
-
-//   if (main_balance < entryFee) {
-//     return res.status(400).json({ message: "Insufficient balance" });
-//   }
-
-//   // Deduct balance
-//   await db.query(
-//     "UPDATE users SET main_balance = main_balance - ? WHERE id=?",
-//     [entryFee, user_id]
-//   );
-
-//   // Count players in the room
-//   const [[{ count: playersCount }]] = await db.query(
-//     "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=?",
-//     [room_id]
-//   );
-
-//   // Prize calculation
-//   const totalPool = entryFee * playersCount;
-//   const platformFee = totalPool * 0.2;
-//   const prize = totalPool - platformFee;
-
-//   // Update prize for this player
-//   await db.query(
-//     "UPDATE bingo_players SET prize=? WHERE room_id=? AND user_id=?",
-//     [prize, room_id, user_id]
-//   );
-
-//   // Notify players + start engine
-//   req.io.to(`room_${room_id}`).emit("countdown_started", { room_id });
-//   engine.startGameEngine(req.io, room_id);
-
-//   res.json({ message: "Confirmed and prize calculated" });
-// };
-
-
-
+// In bingoController.js – updated confirmCard
 
 exports.confirmCard = async (req, res) => {
   const user_id = req.user.id;
   const { room_id } = req.body;
 
-  // 1. Get room & user balance
+  // 1. Check room exists and get current status & entry fee
   const [[room]] = await db.query(
-    "SELECT entry_fee FROM bingo_rooms WHERE id=?",
+    "SELECT status, entry_fee FROM bingo_rooms WHERE id=?",
     [room_id]
   );
-  const [[user]] = await db.query("SELECT main_balance FROM users WHERE id=?", [
-    user_id,
-  ]);
+  if (!room) return res.status(404).json({ message: "Room not found" });
 
+  // ✅ Allow confirmation only if room is 'waiting' or 'countdown'
+  if (room.status !== 'waiting' && room.status !== 'countdown') {
+    return res.status(400).json({ 
+      message: "Cannot confirm now. Room is not open for joining." 
+    });
+  }
+
+  // 2. Check if player already confirmed (prize > 0 means confirmed)
+  const [[player]] = await db.query(
+    "SELECT prize FROM bingo_players WHERE room_id=? AND user_id=?",
+    [room_id, user_id]
+  );
+  if (player && player.prize > 0) {
+    return res.status(400).json({ message: "Already confirmed" });
+  }
+
+  // 3. Get user balance
+  const [[user]] = await db.query(
+    "SELECT main_balance FROM users WHERE id=?",
+    [user_id]
+  );
   const main_balance = Number(user.main_balance);
   const entry_fee = Number(room.entry_fee);
 
-  if (!room || main_balance < entry_fee) {
+  if (main_balance < entry_fee) {
     return res.status(400).json({ message: "Insufficient balance" });
   }
 
-  // 2. Deduct entry fee
+  // 4. Deduct entry fee
   await db.query(
     "UPDATE users SET main_balance = main_balance - ? WHERE id=?",
     [entry_fee, user_id]
   );
 
-  // 3. Count confirmed players for this room
+  // 5. Count current confirmed players (before this confirmation)
   const [[{ count: playersCount }]] = await db.query(
     "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
     [room_id]
   );
 
-  // 4. Calculate prize (example: 80% of total pool)
-  const totalPool = entry_fee * (playersCount + 1); // include this player
+  // 6. Calculate prize (80% of total pool including this player)
+  const totalPool = entry_fee * (playersCount + 1);
   const platformFee = totalPool * 0.2;
   const prize = totalPool - platformFee;
 
-  // 5. Update prize for this player
+  // 7. Update player's prize (this marks them as confirmed)
   await db.query(
     "UPDATE bingo_players SET prize=? WHERE room_id=? AND user_id=?",
     [prize, room_id, user_id]
   );
 
-  // 6. Emit real-time update to room
+  // 8. Emit prize update to the room
   if (req.io) {
     req.io.to(`room_${room_id}`).emit(`room_${room_id}_prize_update`, prize);
   }
 
-  // 7. Optional: start countdown / game engine
-  // engine.startGameEngine(req.io, room_id);
+  // 9. Emit updated confirmed player count
+  const [[{ count: newConfirmedCount }]] = await db.query(
+    "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
+    [room_id]
+  );
+  if (req.io) {
+    req.io.to(`room_${room_id}`).emit("confirmed_player_count", newConfirmedCount);
+  }
 
   res.json({ message: "Confirmed", prize });
 };

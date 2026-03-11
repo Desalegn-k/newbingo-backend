@@ -4,6 +4,8 @@ const db = require("../config/db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel");
+// Import the OTP sender
+const { sendOTP } = require('../utils/smsService');
 
 // 1️⃣ Send OTP
 // const { sendOTP } = require("../utils/otpSender");
@@ -39,12 +41,54 @@ const User = require("../models/userModel");
 
 // 2️⃣ Register and send otp
 // ✅ Register User & Send OTP (for verification)
+ 
+
+// ----------------------------------------------------------------------
+// Phone validation helper (country‑specific)
+// ----------------------------------------------------------------------
+function validatePhoneByCountry(fullPhone) {
+  const countryRules = {
+    "+251": { length: 9, firstDigit: "9" }, // Ethiopia – 9 digits, must start with 9
+    "+1":   { length: 10 },                 // USA/Canada – 10 digits
+    "+44":  { length: 10 },                 // UK – 10 digits (excluding leading 0)
+    "+254": { length: 9 },                  // Kenya – 9 digits
+    "+255": { length: 9 },                  // Tanzania – 9 digits
+    "+256": { length: 9 },                  // Uganda – 9 digits
+  };
+
+  const matchedCode = Object.keys(countryRules).find(code => fullPhone.startsWith(code));
+  if (!matchedCode) {
+    // Unknown country code – fallback to generic 10‑15 digit (with optional +)
+    const genericRegex = /^\+?[0-9]{10,15}$/;
+    return genericRegex.test(fullPhone);
+  }
+
+  const rule = countryRules[matchedCode];
+  const localNumber = fullPhone.slice(matchedCode.length);
+
+  if (!/^\d+$/.test(localNumber)) return false;
+  if (localNumber.length !== rule.length) return false;
+  if (rule.firstDigit && localNumber[0] !== rule.firstDigit) return false;
+
+  return true;
+}
+
+// ----------------------------------------------------------------------
+// Register new user
+// ----------------------------------------------------------------------
 exports.register = async (req, res) => {
   try {
     const { username, phone, password } = req.body;
 
     if (!username || !phone || !password)
       return res.status(400).json({ message: "All fields required" });
+
+    // ---- Phone validation ----
+    if (!validatePhoneByCountry(phone)) {
+      return res.status(400).json({
+        message: "Invalid phone number format for the selected country.",
+      });
+    }
 
     // Check if phone already exists
     const [user] = await db.query("SELECT * FROM users WHERE phone = ?", [
@@ -56,29 +100,37 @@ exports.register = async (req, res) => {
     // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    //referal code
+    // Generate referral code
     function generateReferralCode(length = 9) {
-      const characters = "abcdefghijklmnopqrstuvwxyz0123456789";
+      const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
       let code = "";
       for (let i = 0; i < length; i++) {
-        const randomIndex = Math.floor(Math.random() * characters.length);
-        code += characters[randomIndex];
+        const randomIndex = Math.floor(Math.random() * chars.length);
+        code += chars[randomIndex];
       }
       return code;
     }
-
-    // Example usage
-    const newCode = generateReferralCode();
-    console.log(`your referalcode:${newCode}`); // Example output: 'A7B9C2D'
+    const referralCode = generateReferralCode();
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Save user (with OTP)
+    // Insert user
     await db.query(
-      "INSERT INTO users (username, phone, password, otp,referral_code, is_verified) VALUES (?, ?, ?, ?, ?,?)",
-      [username, phone, hashedPassword, otp,newCode, 0]
+      "INSERT INTO users (username, phone, password, otp, referral_code, is_verified) VALUES (?, ?, ?, ?, ?, ?)",
+      [username, phone, hashedPassword, otp, referralCode, 0],
     );
+
+    // 🔥 Send OTP via SMS
+    const smsResult = await sendOTP(phone, otp);
+
+    if (smsResult.success) {
+      console.log(`📲 OTP sent to ${phone}`);
+    } else {
+      console.error(`⚠️ OTP delivery failed for ${phone}: ${smsResult.error}`);
+      // Optionally, you could delete the user or mark that SMS failed.
+      // For now, we still return success to the client because the user is created.
+    }
 
     console.log(`📲 Registration OTP for ${phone}: ${otp}`);
 
@@ -90,6 +142,70 @@ exports.register = async (req, res) => {
   } catch (error) {
     console.error("❌ Registration Error:", error);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ----------------------------------------------------------------------
+// Login (optional validation added)
+// ----------------------------------------------------------------------
+exports.login = async (req, res) => {
+  try {
+    const { phone, password } = req.body;
+
+    if (!phone || !password)
+      return res.status(400).json({ message: "Phone and password required" });
+
+    // Optional: validate phone format (same helper)
+    if (!validatePhoneByCountry(phone)) {
+      return res.status(400).json({ message: "Invalid phone number format." });
+    }
+
+    const users = await User.findByPhone(phone);
+    if (users.length === 0)
+      return res.status(400).json({ message: "User not found" });
+
+    const user = users[0];
+
+    if (!user.is_verified)
+      return res.status(403).json({ message: "Please verify your OTP first" });
+
+    const isMatch = bcrypt.compareSync(password, user.password);
+    if (!isMatch)
+      return res.status(400).json({ message: "Incorrect password" });
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        phone: user.phone,
+        main_balance: user.main_balance,
+        role: user.role,
+      },
+      "secret123",
+      { expiresIn: "1d" }
+    );
+
+    res.json({
+      message: "Login successful",
+      token,
+      main_balance: user.main_balance,
+      role: user.role,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ... rest of your controller (getProfile, updateProfile, etc.) remains unchanged
+// get all users 
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM users");
+    return res.json(rows);
+  } catch (err) {
+    console.log(err);
+    return res.status(500).json({ msg: "Server error" });
   }
 };
 
@@ -136,41 +252,7 @@ exports.verifyOTP = async (req, res) => {
   }
 };
 
-// 4️⃣ Login
-// exports.login = async (req, res) => {
-//   try {
-//     const { phone, password } = req.body;
-
-//     if (!phone || !password)
-//       return res.status(400).json({ message: "Phone and password required" });
-
-//     const users = await User.findByPhone(phone);
-//     if (users.length === 0)
-//       return res.status(400).json({ message: "User not found" });
-
-//     const user = users[0];
-
-//     if (!user.is_verified)
-//       return res.status(403).json({ message: "Please verify your OTP first" });
-
-//     const isMatch = bcrypt.compareSync(password, user.password);
-//     if (!isMatch)
-//       return res.status(400).json({ message: "Incorrect password" });
-
-//     const token = jwt.sign(
-//       { id: user.id, phone: user.phone },
-//       "secret123",
-//       {
-//         expiresIn: "1h",
-//       }
-//     );
-
-//     res.json({ message: "Login successful", token });
-//   } catch (error) {
-//     console.error(error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// };
+ 
 
 exports.login = async (req, res) => {
   try {

@@ -93,7 +93,7 @@ exports.getManualWithdraws = async (req, res) => {
 // send otp
 
 
-const { sendOTP } = require("../utils/smsService");
+const { sendOtpEmail } = require("../utils/emailService");
 
 exports.sendManualWithdrawOTP = async (req, res) => {
   const { phone, amount, bank, accountNumber, accountHolder } = req.body;
@@ -110,7 +110,7 @@ exports.sendManualWithdrawOTP = async (req, res) => {
   try {
     // Check user exists and get balance
     const [userRows] = await db.query(
-      "SELECT main_balance FROM users WHERE phone = ?",
+      "SELECT main_balance, email FROM users WHERE phone = ?",
       [phone],
     );
 
@@ -118,7 +118,14 @@ exports.sendManualWithdrawOTP = async (req, res) => {
       return res.status(404).json({ msg: "User not found" });
     }
 
-    const balance = Number(userRows[0].main_balance);
+    const { email, main_balance } = userRows[0];
+    if (!email) {
+      return res.status(400).json({
+        msg: "No email address is associated with this account.",
+      });
+    }
+
+    const balance = Number(main_balance);
     const withdrawAmount = Number(amount);
 
     // Validation: minimum amount
@@ -136,13 +143,27 @@ exports.sendManualWithdrawOTP = async (req, res) => {
     }
     // generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    // Insert withdrawal request
-     
+    try {
+      await sendOtpEmail(email, otp, "bank withdrawal");
+    } catch (emailError) {
+      console.error("Bank withdrawal OTP email delivery failed:", emailError);
+      return res.status(503).json({
+        msg: "Could not send verification email. Please try again later.",
+      });
+    }
 
     await db.query("UPDATE users SET otp = ? WHERE phone = ?", [otp, phone]);
     console.log(`banck verification otp:${otp}`);
 
-    return res.json({ msg: "OTP sent to console" });
+    const [emailName, emailDomain] = email.split("@");
+    const emailHint = `${emailName[0]}${"*".repeat(
+      Math.max(1, emailName.length - 1),
+    )}@${emailDomain}`;
+
+    return res.json({
+      msg: "OTP sent to your registered email.",
+      emailHint,
+    });
   } catch (err) {
     console.log(err);
     return res.status(500).json({ msg: "Server error" });

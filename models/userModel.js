@@ -1,12 +1,12 @@
 const db = require("../config/db");
 
 const User = {
-  create: async ({ username, phone, password, otp, referral_code }) => {
+  create: async ({ username, phone, email, password, otp, referral_code }) => {
     const sql = `
-      INSERT INTO users (username, phone, password, otp, referral_code)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO users (username, phone, email, password, otp, referral_code)
+      VALUES (?, ?, ?, ?, ?, ?)
     `;
-    await db.query(sql, [username, phone, password, otp, referral_code]);
+    await db.query(sql, [username, phone, email, password, otp, referral_code]);
   },
 
   findByPhone: async (phone) => {

@@ -1,14 +1,14 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
-require("dotenv").config();
+// require("dotenv").config();
 
 const userRoutes = require("./routes/userRoutes");
 const withdrawRoutes = require("./routes/withdrawRoutes");
 const depositRoutes = require("./routes/depositRoutes");
- const bingoRoutes=require("./routes/bingoRouts")
- 
+const bingoRoutes = require("./routes/bingoRouts");
 
 const app = express();
 const server = http.createServer(app);
@@ -21,11 +21,8 @@ app.use((req, res, next) => {
   next();
 });
 
-
 app.use(express.json());
 app.use(cors());
-
- 
 
 // Routes
 app.use("/api/auth", userRoutes);
@@ -54,11 +51,8 @@ io.on("connection", (socket) => {
   });
 });
 
-
- 
-
 // Start server
 const PORT = 5000;
-server.listen(PORT,"0.0.0.0", () =>
-  console.log(`🚀 Server + Socket running on port ${PORT}`)
+server.listen(PORT, "0.0.0.0", () =>
+  console.log(`🚀 Server + Socket running on port ${PORT}`),
 );

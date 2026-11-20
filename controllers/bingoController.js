@@ -93,11 +93,11 @@ const countdownIntervals = {};
 
 exports.startCountdown = async (req, res) => {
   try {
-    const { room_id, seconds = 20 } = req.body;
+    const { room_id, seconds = 60 } = req.body;
 
     const [[room]] = await db.query(
       "SELECT status FROM bingo_rooms WHERE id=?",
-      [room_id]
+      [room_id],
     );
     if (!room) return res.status(404).json({ msg: "Room not found" });
     if (room.status === "countdown" || room.status === "started") {
@@ -113,30 +113,154 @@ exports.startCountdown = async (req, res) => {
 
     let secondsLeft = seconds;
 
+    // Create interval and store with restarted = false
     const intervalId = setInterval(async () => {
       secondsLeft--;
       io.to(`room_${room_id}`).emit("countdown_tick", secondsLeft);
 
       // Update memory
-      countdownIntervals[room_id].secondsLeft = secondsLeft;
+      if (countdownIntervals[room_id]) {
+        countdownIntervals[room_id].secondsLeft = secondsLeft;
+      }
 
       if (secondsLeft <= 0) {
         clearInterval(intervalId);
+        const countdownData = countdownIntervals[room_id]; // get stored data (includes restarted flag)
         delete countdownIntervals[room_id];
 
-        await db.query("UPDATE bingo_rooms SET status='started' WHERE id=?", [
-          room_id,
-        ]);
+        // ------------------------------------------------------------
+        // ✅ Check number of confirmed players (prize > 0)
+        // ------------------------------------------------------------
+        const [[{ count: confirmedCount }]] = await db.query(
+          "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id = ? AND prize > 0",
+          [room_id],
+        );
 
-        io.to(`room_${room_id}`).emit("countdown_finished", { room_id });
+        if (confirmedCount >= 2) {
+          // Enough players – start the game
+          await db.query("UPDATE bingo_rooms SET status='started' WHERE id=?", [
+            room_id,
+          ]);
 
-        const engine = require("../socket/engine");
-        engine.startGameEngine(io, room_id).catch(console.error);
+          io.to(`room_${room_id}`).emit("countdown_finished", { room_id });
+
+          const engine = require("../socket/engine");
+          engine.startGameEngine(io, room_id).catch(console.error);
+        } else {
+          // Not enough players – decide whether to restart or cancel
+          if (!countdownData?.restarted) {
+            // First failure – restart countdown once
+            io.to(`room_${room_id}`).emit("countdown_restarting", {
+              reason: "Not enough players. Restarting countdown...",
+            });
+
+            // Restart countdown with original seconds
+            const newSeconds = seconds; // or use a fixed value like 60
+            await db.query(
+              "UPDATE bingo_rooms SET status='countdown' WHERE id=?",
+              [room_id],
+            );
+
+            io.to(`room_${room_id}`).emit("countdown_started", {
+              seconds: newSeconds,
+            });
+
+            let newSecondsLeft = newSeconds;
+            const newIntervalId = setInterval(async () => {
+              newSecondsLeft--;
+              io.to(`room_${room_id}`).emit("countdown_tick", newSecondsLeft);
+
+              if (newSecondsLeft <= 0) {
+                clearInterval(newIntervalId);
+                delete countdownIntervals[room_id];
+
+                // Check player count again
+                const [[{ count: finalCount }]] = await db.query(
+                  "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id = ? AND prize > 0",
+                  [room_id],
+                );
+
+                if (finalCount >= 2) {
+                  // Enough players now – start game
+                  await db.query(
+                    "UPDATE bingo_rooms SET status='started' WHERE id=?",
+                    [room_id],
+                  );
+                  io.to(`room_${room_id}`).emit("countdown_finished", {
+                    room_id,
+                  });
+
+                  const engine = require("../socket/engine");
+                  engine.startGameEngine(io, room_id).catch(console.error);
+                } else {
+                  // Still not enough – cancel permanently
+                  await db.query(
+                    "UPDATE bingo_rooms SET status='waiting' WHERE id=?",
+                    [room_id],
+                  );
+
+                  // Refund entry fee to each confirmed player
+                  await db.query(
+                    `UPDATE users u
+                     JOIN bingo_players bp ON u.id = bp.user_id
+                     JOIN bingo_rooms r ON bp.room_id = r.id
+                     SET u.main_balance = u.main_balance + r.entry_fee
+                     WHERE bp.room_id = ? AND bp.prize > 0`,
+                    [room_id],
+                  );
+
+                  // Reset prizes to 0
+                  await db.query(
+                    "UPDATE bingo_players SET prize = 0 WHERE room_id = ?",
+                    [room_id],
+                  );
+
+                  io.to(`room_${room_id}`).emit("countdown_cancelled", {
+                    reason:
+                      "Not enough players(only You.Back to home and Try again.",
+                  });
+                }
+              }
+            }, 1000);
+
+            // Store new interval with restarted = true
+            countdownIntervals[room_id] = {
+              intervalId: newIntervalId,
+              secondsLeft: newSeconds,
+              restarted: true,
+            };
+          } else {
+            // Already restarted once – cancel permanently
+            await db.query(
+              "UPDATE bingo_rooms SET status='waiting' WHERE id=?",
+              [room_id],
+            );
+
+            // Refund confirmed players
+            await db.query(
+              `UPDATE users u
+               JOIN bingo_players bp ON u.id = bp.user_id
+               JOIN bingo_rooms r ON bp.room_id = r.id
+               SET u.main_balance = u.main_balance + r.entry_fee
+               WHERE bp.room_id = ? AND bp.prize > 0`,
+              [room_id],
+            );
+
+            await db.query(
+              "UPDATE bingo_players SET prize = 0 WHERE room_id = ?",
+              [room_id],
+            );
+
+            io.to(`room_${room_id}`).emit("countdown_cancelled", {
+              reason: "Not enough players. Game cancelled.",
+            });
+          }
+        }
       }
     }, 1000);
 
-    // Store interval + secondsLeft in memory
-    countdownIntervals[room_id] = { intervalId, secondsLeft };
+    // Store interval + secondsLeft + restarted flag
+    countdownIntervals[room_id] = { intervalId, secondsLeft, restarted: false };
 
     res.json({ success: true });
   } catch (err) {
@@ -144,6 +268,7 @@ exports.startCountdown = async (req, res) => {
     res.status(500).json({ msg: "Server error" });
   }
 };
+
 
 // ------------------- NEW API -------------------
 // GET /bingo/current-countdown/:room_id

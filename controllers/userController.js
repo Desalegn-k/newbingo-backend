@@ -4,8 +4,7 @@ const db = require("../config/db");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel");
-// Import the OTP sender
-const { sendOTP } = require('../utils/smsService');
+const { sendOtpEmail } = require("../utils/emailService");
 
 // 1️⃣ Send OTP
 // const { sendOTP } = require("../utils/otpSender");
@@ -78,10 +77,19 @@ function validatePhoneByCountry(fullPhone) {
 // ----------------------------------------------------------------------
 exports.register = async (req, res) => {
   try {
-    const { username, phone, password } = req.body;
+    const { username, phone, email, password } = req.body;
+    const normalizedEmail =
+      typeof email === "string" ? email.trim().toLowerCase() : "";
 
-    if (!username || !phone || !password)
+    if (!username || !phone || !normalizedEmail || !password)
       return res.status(400).json({ message: "All fields required" });
+
+    if (
+      normalizedEmail.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+    ) {
+      return res.status(400).json({ message: "Invalid email address" });
+    }
 
     // ---- Phone validation ----
     if (!validatePhoneByCountry(phone)) {
@@ -91,11 +99,19 @@ exports.register = async (req, res) => {
     }
 
     // Check if phone already exists
-    const [user] = await db.query("SELECT * FROM users WHERE phone = ?", [
-      phone,
-    ]);
-    if (user.length > 0)
+    const [existingUsers] = await db.query(
+      "SELECT phone, email FROM users WHERE phone = ? OR LOWER(email) = ?",
+      [phone, normalizedEmail],
+    );
+    if (existingUsers.some((user) => String(user.phone) === String(phone)))
       return res.status(400).json({ message: "Phone already registered" });
+    if (
+      existingUsers.some(
+        (user) => user.email?.toLowerCase() === normalizedEmail,
+      )
+    ) {
+      return res.status(400).json({ message: "Email already registered" });
+    }
 
     // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -116,28 +132,31 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Insert user
-    await db.query(
-      "INSERT INTO users (username, phone, password, otp, referral_code, is_verified) VALUES (?, ?, ?, ?, ?, ?)",
-      [username, phone, hashedPassword, otp, referralCode, 0],
+    const [insertResult] = await db.query(
+      "INSERT INTO users (username, phone, email, password, otp, referral_code, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [username, phone, normalizedEmail, hashedPassword, otp, referralCode, 0],
     );
-
-    // 🔥 Send OTP via SMS
-    const smsResult = await sendOTP(phone, otp);
-
-    if (smsResult.success) {
-      console.log(`📲 OTP sent to ${phone}`);
-    } else {
-      console.error(`⚠️ OTP delivery failed for ${phone}: ${smsResult.error}`);
-      // Optionally, you could delete the user or mark that SMS failed.
-      // For now, we still return success to the client because the user is created.
-    }
 
     console.log(`📲 Registration OTP for ${phone}: ${otp}`);
 
+    try {
+      await sendOtpEmail(normalizedEmail, otp, "account verification");
+    } catch (emailError) {
+      console.error("Registration OTP email delivery failed:", emailError);
+      await db.query(
+        "DELETE FROM users WHERE id = ? AND is_verified = 0",
+        [insertResult.insertId],
+      );
+      return res.status(503).json({
+        message: "Could not send verification email. Please try again later.",
+      });
+    }
+
     res.status(200).json({
       success: true,
-      message: "User registered successfully, OTP sent to console",
+      message: "User registered successfully. OTP sent to your email.",
       phone,
+      email: normalizedEmail,
     });
   } catch (error) {
     console.error("❌ Registration Error:", error);
@@ -358,11 +377,30 @@ exports.sendResetOTP = async (req, res) => {
     if (user.length === 0)
       return res.status(404).json({ success: false, message: "User not found" });
 
+    if (!user[0].email) {
+      return res.status(400).json({
+        success: false,
+        message: "No email address is associated with this account.",
+      });
+    }
+
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    try {
+      await sendOtpEmail(user[0].email, otp, "password reset");
+    } catch (emailError) {
+      console.error("Password reset OTP email delivery failed:", emailError);
+      return res.status(503).json({
+        success: false,
+        message: "Could not send password reset email. Please try again later.",
+      });
+    }
+
     await db.query("UPDATE users SET otp = ? WHERE phone = ?", [otp, phone]);
 
-    await sendOTP(phone, otp);
-    res.status(200).json({ success: true, message: "OTP sent successfully for password reset" });
+    res.status(200).json({
+      success: true,
+      message: "Password reset OTP sent to your email.",
+    });
   } catch (error) {
     console.error("❌ Send Reset OTP Error:", error);
     res.status(500).json({ success: false, message: "Server error" });

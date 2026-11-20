@@ -1,10 +1,9 @@
+require("dotenv").config();
 const mysql = require("mysql2");
 
 const db = mysql.createPool({
-  host: "localhost",
-  user: "desubingo",
-  password: "12345678", // your MySQL password
-  database: "bingo_db",
+  uri: process.env.DATABASE_URL,
+  ssl: {},
 });
 
 // db.connect((err) => {

@@ -1,10 +1,10 @@
 require("dotenv").config();
 const mysql = require("mysql2");
 
-const databaseUrl = new URL(process.env.DATABASE_URL);
-databaseUrl.searchParams.delete("ssl");
+const db = mysql.createPool({
+  uri: process.env.DATABASE_URL,
 
-const db = mysql.createPool({ uri: databaseUrl.toString() });
+});
 
 // db.connect((err) => {
 //   if (err) throw err;

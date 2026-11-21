@@ -1,20 +1,20 @@
-const TelegramBot = require("node-telegram-bot-api");
+const { Bot: TelegramBot } = require("node-telegram-bot-api");
 
 const translations = {
   en: {
     welcome: "🎉 Welcome to Desu Bingo!\n\nChoose an option below:",
     about:
-      "Desu Bingo is an online Bingo game. Open the website, choose a room and card, then confirm your card to play.",
+      "🎉🔥 Welcome to Desu Bingo (DESU BINGO)! 🎮 Enjoy an exciting online Bingo experience and try your luck for a chance to win cash prizes! 💰 Who knows? Today might be your lucky day! 🌟 Visit our website, choose a game room and your Bingo card, confirm your card, and enjoy the game while following the game rules! 🚀 DESU BINGO – Could today be your winning day?",
     website: "Open the Desu Bingo website:",
     websiteUnavailable: "The website link is not configured yet.",
     support: "For assistance, contact our support team:",
     supportButton: "Contact support",
     chooseLanguage: "Choose your language:",
     languageChanged: "Language set to English.",
-    unknown: "Please choose an option from the menu.",
+    unknown: "Unknown Command❌, Please choose an option from the menu.",
     menu: [
       ["🎮 About the Game"],
-      ["🌐 Open Website"],
+      ["🌐 Open the Game"],
       ["📞 Help & Support"],
       ["🌍 Change Language"],
     ],
@@ -22,17 +22,17 @@ const translations = {
   am: {
     welcome: "🎉 ወደ ዴሱ ቢንጎ እንኳን በደህና መጡ!\n\nከታች አንዱን ይምረጡ፦",
     about:
-      "ዴሱ ቢንጎ የመስመር ላይ የቢንጎ ጨዋታ ነው። ድረ-ገጹን ይክፈቱ፣ ክፍልና ካርድ ይምረጡ፣ ከዚያም ካርዱን ያረጋግጡ።",
-    website: "የዴሱ ቢንጎ ድረ-ገጽን ይክፈቱ፦",
+      "🎉🔥 እንኳን ወደ ደሱ ቢንጎ (DESU BINGO) በደህና መጡ! 🎮 እየተዝናኑ የገንዘብ ሽልማት እና የማሸነፍ ዕድልዎን ይሞክሩ! 💰 ማን ያውቃል? ምናልባት ዛሬ የእርስዎ የድል ቀን ይሆናል! 🌟 ጨዋታውን ይክፈቱ፣ የጨዋታ ክፍልና ካርድ ይምረጡ፣ ካርዱን ያረጋግጡ እና የጨዋታውን ደንቦች በመከተል ይዝናኑ! 🚀 DESU BINGO – ዛሬ የማን የድል ቀን ይሆን?",
+    website: "የደሱ ቢንጎ ጨዋታን ይክፈቱ፦",
     websiteUnavailable: "የድረ-ገጹ አድራሻ ገና አልተዋቀረም።",
     support: "እገዛ ከፈለጉ የድጋፍ ቡድናችንን ያግኙ፦",
     supportButton: "ድጋፍን ያግኙ",
     chooseLanguage: "ቋንቋዎን ይምረጡ፦",
     languageChanged: "ቋንቋው ወደ አማርኛ ተቀይሯል።",
-    unknown: "እባክዎ ከምናሌው አንዱን ይምረጡ።",
+    unknown: "የማይታወቅ ትዛዝ ነው❌ እባክዎ ከታች ካለው ዝርዝር  አንዱን ይምረጡ።",
     menu: [
       ["🎮 ስለ ጨዋታው"],
-      ["🌐 ድረ-ገጹን ክፈት"],
+      ["🌐 ጨዋታውን ይክፈቱ"],
       ["📞 እገዛ እና ድጋፍ"],
       ["🌍 ቋንቋ ቀይር"],
     ],
@@ -59,20 +59,12 @@ function startTelegramBot() {
     return null;
   }
 
-  const bot = new TelegramBot(token, { polling: true });
+  const bot = new TelegramBot(token);
   const languages = new Map();
   const websiteUrl = getConfiguredUrl(process.env.FRONTEND_URL);
   const supportUrl =
     getConfiguredUrl(process.env.SUPPORT_TELEGRAM_URL) ||
     "https://t.me/desubingo";
-
-  const sendMessage = async (chatId, text, options) => {
-    try {
-      await bot.sendMessage(chatId, text, options);
-    } catch (error) {
-      console.error("Telegram message failed:", error.message);
-    }
-  };
 
   const menuOptions = (language) => ({
     reply_markup: {
@@ -81,52 +73,50 @@ function startTelegramBot() {
     },
   });
 
-  bot.onText(/^\/(?:start|help)(?:@\w+)?(?:\s|$)/, async (msg) => {
-    const language = languages.get(msg.chat.id) || "en";
-    await sendMessage(
-      msg.chat.id,
+  bot.command(["start", "help"], async (ctx) => {
+    const language = languages.get(ctx.chatId) || "en";
+    await ctx.reply(
       translations[language].welcome,
       menuOptions(language),
     );
   });
 
-  bot.on("message", async (msg) => {
-    const text = msg.text?.trim();
-    if (!text || text.startsWith("/")) return;
+  bot.hears(["English", "አማርኛ"], async (ctx) => {
+    const text = ctx.message?.text;
+    const selectedLanguage = text === "አማርኛ" ? "am" : "en";
+    if (ctx.chatId === undefined) return;
+    languages.set(ctx.chatId, selectedLanguage);
+    await ctx.reply(
+      translations[selectedLanguage].languageChanged,
+      menuOptions(selectedLanguage),
+    );
+  });
 
-    const chatId = msg.chat.id;
-    const language = languages.get(chatId) || "en";
+  const menuActions = {
+    "🎮 About the Game": "about",
+    "🎮 ስለ ጨዋታው": "about",
+    "🌐 Open the Game": "website",
+    "🌐 ጨዋታውን ይክፈቱ": "website",
+    "📞 Help & Support": "support",
+    "📞 እገዛ እና ድጋፍ": "support",
+    "🌍 Change Language": "language",
+    "🌍 ቋንቋ ቀይር": "language",
+  };
+
+  bot.hears(Object.keys(menuActions), async (ctx) => {
+    const text = ctx.message?.text;
+    if (!text || ctx.chatId === undefined) return;
+
+    const language = languages.get(ctx.chatId) || "en";
     const messages = translations[language];
-
-    if (text === "English" || text === "አማርኛ") {
-      const selectedLanguage = text === "አማርኛ" ? "am" : "en";
-      languages.set(chatId, selectedLanguage);
-      await sendMessage(
-        chatId,
-        translations[selectedLanguage].languageChanged,
-        menuOptions(selectedLanguage),
-      );
-      return;
-    }
-
-    const menuActions = {
-      "🎮 About the Game": "about",
-      "🎮 ስለ ጨዋታው": "about",
-      "🌐 Open Website": "website",
-      "🌐 ድረ-ገጹን ክፈት": "website",
-      "📞 Help & Support": "support",
-      "📞 እገዛ እና ድጋፍ": "support",
-      "🌍 Change Language": "language",
-      "🌍 ቋንቋ ቀይር": "language",
-    };
 
     switch (menuActions[text]) {
       case "about":
-        await sendMessage(chatId, messages.about, menuOptions(language));
+        await ctx.reply(messages.about, menuOptions(language));
         break;
       case "website":
         if (websiteUrl) {
-          await sendMessage(chatId, messages.website, {
+          await ctx.reply(messages.website, {
             reply_markup: {
               inline_keyboard: [
                 [{ text: "Desu Bingo", url: websiteUrl }],
@@ -134,15 +124,11 @@ function startTelegramBot() {
             },
           });
         } else {
-          await sendMessage(
-            chatId,
-            messages.websiteUnavailable,
-            menuOptions(language),
-          );
+          await ctx.reply(messages.websiteUnavailable, menuOptions(language));
         }
         break;
       case "support":
-        await sendMessage(chatId, messages.support, {
+        await ctx.reply(messages.support, {
           reply_markup: {
             inline_keyboard: [
               [{ text: messages.supportButton, url: supportUrl }],
@@ -151,7 +137,7 @@ function startTelegramBot() {
         });
         break;
       case "language":
-        await sendMessage(chatId, messages.chooseLanguage, {
+        await ctx.reply(messages.chooseLanguage, {
           reply_markup: {
             keyboard: [["English", "አማርኛ"]],
             resize_keyboard: true,
@@ -164,11 +150,33 @@ function startTelegramBot() {
     }
   });
 
-  bot.on("polling_error", (error) => {
-    console.error("Telegram polling error:", error.message);
+  bot.on("message", async (ctx) => {
+    const text = ctx.message?.text;
+    if (!text || text.startsWith("/")) return;
+
+    const language =
+      ctx.chatId === undefined ? "en" : languages.get(ctx.chatId) || "en";
+    await ctx.reply(
+      translations[language].unknown,
+      menuOptions(language),
+    );
+  });
+
+  bot.catch((error) => {
+    console.error(
+      "Telegram update failed:",
+      error instanceof Error ? error.message : error,
+    );
   });
 
   console.info("Telegram bot polling is enabled.");
+  bot.startPolling().catch((error) => {
+    console.error(
+      "Telegram polling failed:",
+      error instanceof Error ? error.message : error,
+    );
+  });
+
   return bot;
 }
 

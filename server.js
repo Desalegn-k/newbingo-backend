@@ -9,6 +9,7 @@ const userRoutes = require("./routes/userRoutes");
 const withdrawRoutes = require("./routes/withdrawRoutes");
 const depositRoutes = require("./routes/depositRoutes");
 const bingoRoutes = require("./routes/bingoRouts");
+const { startTelegramBot } = require("./config/telegramBot");
 
 const app = express();
 const server = http.createServer(app);
@@ -29,6 +30,8 @@ app.use("/api/auth", userRoutes);
 app.use("/api/withdraw", withdrawRoutes);
 app.use("/api/deposit", depositRoutes);
 app.use("/api/bingo", bingoRoutes);
+
+startTelegramBot();
 
 // socket connection and simple handlers
 io.on("connection", (socket) => {

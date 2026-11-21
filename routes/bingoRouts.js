@@ -41,6 +41,7 @@ router.get("/prize/:roomId", bingo.getPrize);
 
 // Get room state
 router.get("/state", bingo.getRoomState);
+router.get("/my-active-game", verifyToken, bingo.getMyActiveGame);
 
 // Claim bingo
 router.post("/claim", verifyToken, bingo.claimBingo);

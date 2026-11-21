@@ -592,6 +592,25 @@ exports.getRoomState = async (req, res) => {
   res.json({ room, players });
 };
 
+exports.getMyActiveGame = async (req, res) => {
+  try {
+    const [[room]] = await db.query(
+      `SELECT r.id
+       FROM bingo_rooms r
+       JOIN bingo_players bp ON bp.room_id = r.id
+       WHERE bp.user_id = ? AND bp.prize > 0 AND r.status = 'started'
+       ORDER BY r.id DESC
+       LIMIT 1`,
+      [req.user.id]
+    );
+
+    res.json({ room_id: room?.id ?? null });
+  } catch (error) {
+    console.error("getMyActiveGame error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 // ------------------------------------------------------
 // CLAIM BINGO
 // ------------------------------------------------------

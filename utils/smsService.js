@@ -11,7 +11,7 @@
 //     throw error;
 //   }
 // };
-
+// this is a more robust implementation using Africa's Talking for sending SMS messages, including OTPs. It handles errors and provides feedback on the success of the operation.
 
 const africastalking = require("africastalking");
 

@@ -585,7 +585,7 @@ exports.getRoomState = async (req, res) => {
   );
 
   const [players] = await db.query(
-    "SELECT user_id, card, is_winner, prize FROM bingo_players WHERE room_id=?",
+    "SELECT user_id, card, selected_number, is_winner, prize FROM bingo_players WHERE room_id=?",
     [room_id]
   );
 

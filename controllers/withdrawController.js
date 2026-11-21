@@ -1,5 +1,6 @@
 
 const db = require("../config/db");
+const bcrypt = require("bcryptjs");
 
 
 
@@ -90,147 +91,90 @@ exports.getManualWithdraws = async (req, res) => {
   } 
 };
 
-// send otp
+exports.requestManualWithdraw = async (req, res) => {
+  const { amount, bank, accountNumber, accountHolder, password } = req.body;
+  const withdrawAmount = Number(amount);
 
-
-const { sendOtpEmail } = require("../utils/emailService");
-
-exports.sendManualWithdrawOTP = async (req, res) => {
-  const { phone, amount, bank, accountNumber, accountHolder } = req.body;
-
-  if (!phone || !amount || !bank || !accountNumber || !accountHolder)
+  if (
+    !amount ||
+    !bank ||
+    !accountNumber ||
+    !accountHolder ||
+    typeof password !== "string" ||
+    !password
+  ) {
     return res.status(400).json({ msg: "All fields required" });
-    if (isNaN(accountNumber)) {
-      return (
-        res.status(400).
-        json({ msg: "Account number must be a number" })
-      );
-    }
-
-  try {
-    // Check user exists and get balance
-    const [userRows] = await db.query(
-      "SELECT main_balance, email FROM users WHERE phone = ?",
-      [phone],
-    );
-
-    if (userRows.length === 0) {
-      return res.status(404).json({ msg: "User not found" });
-    }
-
-    const { email, main_balance } = userRows[0];
-    if (!email) {
-      return res.status(400).json({
-        msg: "No email address is associated with this account.",
-      });
-    }
-
-    const balance = Number(main_balance);
-    const withdrawAmount = Number(amount);
-
-    // Validation: minimum amount
-    if (withdrawAmount < 100) {
-      return res.status(400).json({
-        msg: `<p  >Minimum withdraw is 100 ETB</p>`,
-      });
-    }
-
-    // Validation: sufficient balance
-    if (balance < withdrawAmount) {
-      return res.status(400).json({
-        msg: `<p  >Insufficient Balance</p>`,
-      });
-    }
-    // generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    try {
-      await sendOtpEmail(email, otp, "bank withdrawal");
-    } catch (emailError) {
-      console.error("Bank withdrawal OTP email delivery failed:", emailError);
-      return res.status(503).json({
-        msg: "Could not send verification email. Please try again later.",
-      });
-    }
-
-    await db.query("UPDATE users SET otp = ? WHERE phone = ?", [otp, phone]);
-    console.log(`banck verification otp:${otp}`);
-
-    const [emailName, emailDomain] = email.split("@");
-    const emailHint = `${emailName[0]}${"*".repeat(
-      Math.max(1, emailName.length - 1),
-    )}@${emailDomain}`;
-
-    return res.json({
-      msg: "OTP sent to your registered email.",
-      emailHint,
-    });
-  } catch (err) {
-    console.log(err);
-    return res.status(500).json({ msg: "Server error" });
   }
-};
 
+  if (!/^\d+$/.test(String(accountNumber))) {
+    return res.status(400).json({ msg: "Account number must be a number" });
+  }
 
+  if (!Number.isFinite(withdrawAmount) || withdrawAmount < 100) {
+    return res.status(400).json({ msg: "Minimum withdraw is 100 ETB" });
+  }
 
-// manual withdraw
-exports.verifyManualWithdraw = async (req, res) => {
-  const { phone, amount, otp, bank, accountNumber, accountHolder } = req.body;
-
-  if (!phone || !amount || !otp || !bank || !accountNumber || !accountHolder)
-    return res.status(400).json({ msg: "All fields required" });
+  let connection;
+  let transactionStarted = false;
 
   try {
-    const [rows] = await db.query(
-      "SELECT main_balance, otp AS savedOTP FROM users WHERE phone = ?",
-      [phone],
-    );
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+    transactionStarted = true;
 
-    if (rows.length === 0)
+    const [users] = await connection.query(
+      "SELECT phone, password, main_balance FROM users WHERE id = ? FOR UPDATE",
+      [req.user.id],
+    );
+    const user = users[0];
+
+    if (!user) {
+      await connection.rollback();
+      transactionStarted = false;
       return res.status(404).json({ msg: "User not found" });
+    }
 
-    const { main_balance, savedOTP } = rows[0];
+    if (!(await bcrypt.compare(password, user.password))) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(401).json({ msg: "Incorrect password" });
+    }
 
-    if (savedOTP != otp) return res.status(400).json({ msg: "Invalid OTP" });
+    if (Number(user.main_balance) < withdrawAmount) {
+      await connection.rollback();
+      transactionStarted = false;
+      return res.status(400).json({ msg: "Insufficient Balance" });
+    }
 
-    const balance = Number(main_balance);
-    const withdrawAmount = Number(amount);
-
-    if (balance < withdrawAmount)
-      return res.status(400).json({
-        msg: `<p style="color: red; background-color:pink; border:solid; border-radius:10px; border-color:red; padding:10px; width:350px; margin-left:15px">Insufficient Balance</p>`,
-      });
-
-    if (withdrawAmount < 100)
-      return res.status(400).json({
-        msg: `<p style="color: red !important; background-color:pink; border:solid; border-radius:10px; border-color:red; padding:10px; width:90%;">Minimum withdraw is 100 ETB</p>`,
-      });
-
-    // 1. Deduct balance and clear OTP
-    await db.query(
-      "UPDATE users SET main_balance = main_balance - ?, otp = NULL WHERE phone = ?",
-      [amount, phone],
+    await connection.query(
+      "UPDATE users SET main_balance = main_balance - ? WHERE id = ?",
+      [withdrawAmount, req.user.id],
+    );
+    await connection.query(
+      `INSERT INTO manual_withdraw_requests
+       (user_phone, amount, bank, account_number, account_holder, otp)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      [user.phone, withdrawAmount, bank, accountNumber, accountHolder],
     );
 
-    // 2. Insert the successful withdrawal request (now at the end, after verification)
-    const insertSql = `
-      INSERT INTO manual_withdraw_requests 
-      (user_phone, amount, bank, account_number, account_holder, otp)
-      VALUES (?, ?, ?, ?, ?, ?)`;
-    await db.query(insertSql, [
-      phone,
-      amount,
-      bank,
-      accountNumber,
-      accountHolder,
-      otp, // the OTP that was just verified
-    ]);
+    await connection.commit();
+    transactionStarted = false;
 
     return res.json({
-      msg: `<p style="color: green; background-color:lightgreen; border:solid; border-radius:10px; border-color:green; padding:3px; width:100%; ">Bank withdraw successful, the balance will be added to your account in a few minutes.</p>`,
+      msg: "Bank withdrawal request submitted for admin review.",
     });
-  } catch (err) {
-    console.log(err);
+  } catch (error) {
+    if (transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("Manual withdrawal rollback failed:", rollbackError);
+      }
+    }
+    console.error("Manual withdrawal request failed:", error);
     return res.status(500).json({ msg: "Server error" });
+  } finally {
+    if (connection) connection.release();
   }
 };
 // update manual withdraw status

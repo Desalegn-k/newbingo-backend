@@ -1,10 +1,14 @@
 const express = require("express");
 const router = express.Router();
 const withdrawController = require("../controllers/withdrawController");
+const { verifyToken } = require("../middleware/authMiddleware");
 
 router.post("/direct", withdrawController.directWithdraw);
-router.post("/manual/send-otp", withdrawController.sendManualWithdrawOTP);
-router.post("/manual/verify", withdrawController.verifyManualWithdraw);
+router.post(
+  "/manual/request",
+  verifyToken,
+  withdrawController.requestManualWithdraw,
+);
 // Admin route to get manual withdraw requests
 router.get("/admin/manual-withdraws", withdrawController.getManualWithdraws);
 // Admin route to get direct withdraw requests

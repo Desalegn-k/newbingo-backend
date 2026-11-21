@@ -79,14 +79,17 @@ exports.register = async (req, res) => {
   try {
     const { username, phone, email, password } = req.body;
     const normalizedEmail =
-      typeof email === "string" ? email.trim().toLowerCase() : "";
+      typeof email === "string" && email.trim()
+        ? email.trim().toLowerCase()
+        : null;
 
-    if (!username || !phone || !normalizedEmail || !password)
+    if (!username || !phone || !password)
       return res.status(400).json({ message: "All fields required" });
 
     if (
-      normalizedEmail.length > 254 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+      normalizedEmail &&
+      (normalizedEmail.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail))
     ) {
       return res.status(400).json({ message: "Invalid email address" });
     }
@@ -100,21 +103,19 @@ exports.register = async (req, res) => {
 
     // Check if phone already exists
     const [existingUsers] = await db.query(
-      "SELECT phone, email FROM users WHERE phone = ? OR LOWER(email) = ?",
-      [phone, normalizedEmail],
+      "SELECT phone, email FROM users WHERE phone = ? OR (? IS NOT NULL AND LOWER(email) = ?)",
+      [phone, normalizedEmail, normalizedEmail],
     );
     if (existingUsers.some((user) => String(user.phone) === String(phone)))
       return res.status(400).json({ message: "Phone already registered" });
     if (
+      normalizedEmail &&
       existingUsers.some(
         (user) => user.email?.toLowerCase() === normalizedEmail,
       )
     ) {
       return res.status(400).json({ message: "Email already registered" });
     }
-
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
     // Generate referral code
     function generateReferralCode(length = 9) {
@@ -132,29 +133,14 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Insert user
-    const [insertResult] = await db.query(
+    await db.query(
       "INSERT INTO users (username, phone, email, password, otp, referral_code, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [username, phone, normalizedEmail, hashedPassword, otp, referralCode, 0],
+      [username, phone, normalizedEmail, hashedPassword, null, referralCode, 1],
     );
-
-    console.log(`📲 Registration OTP for ${phone}: ${otp}`);
-
-    try {
-      await sendOtpEmail(normalizedEmail, otp, "account verification");
-    } catch (emailError) {
-      console.error("Registration OTP email delivery failed:", emailError);
-      await db.query(
-        "DELETE FROM users WHERE id = ? AND is_verified = 0",
-        [insertResult.insertId],
-      );
-      return res.status(503).json({
-        message: "Could not send verification email. Please try again later.",
-      });
-    }
 
     res.status(200).json({
       success: true,
-      message: "User registered successfully. OTP sent to your email.",
+      message: "User registered successfully. Please log in.",
       phone,
       email: normalizedEmail,
     });

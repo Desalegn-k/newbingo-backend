@@ -28,13 +28,9 @@ exports.directWithdraw = async (req, res) => {
     console.log(amount);
 
     if (balance < withdrawAmount)
-      return res.status(400).json({
-        msg: `<p >Insufficient Balance</p>`,
-      });
+      return res.status(400).json({ msg: "Insufficient Balance" });
     if (withdrawAmount < 100)
-      return res.status(400).json({
-        msg: `<p >Minimum withdraw is 100 ETB</p>`,
-      });
+      return res.status(400).json({ msg: "Minimum withdraw is 100 ETB" });
 
     // deduct balance
     await db.query(
@@ -54,16 +50,7 @@ exports.directWithdraw = async (req, res) => {
 
 
     return res.json({
-      msg: `<p style="
-    color: green;
-     background-color:lightgreen;
-     border:solid;
-     border-radius:10px;
-     border-color:green;
-      padding:3px
-     width:100%;
-      
-    ">Direct withdraw successful,the balance will be added to your account in few minutes .</p>`,
+      msg: "Direct withdrawal successful. The balance will be added to your account in a few minutes.",
     });
   } catch (err) {
     console.log(err);

@@ -117,7 +117,7 @@ exports.deposit = async (req, res) => {
             </div>
           </div>
 
-          <!-- CBE Birr -->
+          <!-- CBE  -->
           <div style="
             background: #f1f5f9;
             border-radius: 14px;
@@ -132,7 +132,7 @@ exports.deposit = async (req, res) => {
             ">
               <img 
                 src="/images/cbe1.jpg" 
-                alt="CBE Birr" 
+                alt="CBE" 
                 style="
                    height: 80px;
                   width: 80px;
@@ -147,7 +147,7 @@ exports.deposit = async (req, res) => {
                 font-size: 25px;
                 padding: 4px 18px;
                 border-radius: 20px;
-              ">CBE Birr</span>
+              ">CBE Birr/CBE</span>
             </div>
             <div style="display: flex; flex-wrap: wrap; gap: 20px;">
               <div style="min-width: 200px;">
@@ -156,7 +156,7 @@ exports.deposit = async (req, res) => {
               </div>
               <div>
                 <div style="font-size: 15px; color: #9E168D; margin-bottom: 2px;">አካውንት ቁጥር</div>
-                <div style="font-weight: 600; font-size: 18px; color: #9E168D; letter-spacing: 0.5px;">0932655680</div>
+                <div style="font-weight: 600; font-size: 18px; color: #9E168D; letter-spacing: 0.5px;">0932655680 ወይም 1000370116327</div>
               </div>
             </div>
           </div>
@@ -170,7 +170,10 @@ exports.deposit = async (req, res) => {
             border-top: 1px solid #e2e8f0;
             padding-top: 16px;
           ">
-            ክፍያዎን ካጠናቀቁ በኋላ የግብይት መለያዎን (Transaction ID) ወይም ሲከፍሉ የገባውን message  በመጠቀም ማረጋገጫ ከታች ባልው ቦታ ይላኩ።
+            ክፍያዎን ካጠናቀቁ በኋላ የግብይት መለያዎን (Transaction ID) ወይም ሲከፍሉ የገባውን ሙሉዉን message ከታች ባልው ቦታ ይላኩ። ወይም የደረሰኝ secreen shot ለመላክ ከፈልጉ screen shot ለመላክ የሚለውን ይጫኑ
+            <a href="https://t.me/DesuBingoSupporter" target="_blank" rel="noopener noreferrer">
+              <strong style="color: #3b82f6;">Screen shot ለመላክ</strong>
+            </a> 
           </div>
         </div>
       `,

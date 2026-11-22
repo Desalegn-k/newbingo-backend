@@ -65,7 +65,7 @@ function startTelegramBot() {
   const websiteUrl = getConfiguredUrl(process.env.FRONTEND_URL);
   const supportUrl =
     getConfiguredUrl(process.env.SUPPORT_TELEGRAM_URL) ||
-    "https://t.me/desubingo";
+    "https://t.me/DesuBingoSupporter";
 
   const menuOptions = (language) => ({
     reply_markup: {

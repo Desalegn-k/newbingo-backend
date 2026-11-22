@@ -6,9 +6,9 @@ const translations = {
       "🎉 Welcome to Desu Bingo!\n\nWelcome Bonus: 10 Birr directly into your account\n\nChoose an option below:",
     about:
       "🎉🔥 Welcome to Desu Bingo (DESU BINGO)! 🎮\n\nWelcome Bonus: 10 Birr directly into your account!!\n\n  Enjoy an exciting online Bingo experience and try your luck for a chance to win cash prizes! \n💰 Who knows? Today might be your lucky day!\n 🌟 Visit our website, choose a game room and your Bingo card, confirm your card, and enjoy the game while following the game rules! \n🚀 DESU BINGO – Could today be your winning day?",
-    website: "Open the Desu Bingo website:",
+    website: "Open the Desu Bingo website 👇:",
     websiteUnavailable: "The website link is not configured yet.",
-    support: "For assistance, contact our support team:",
+    support: "For assistance, contact our support team 👇:",
     supportButton: "Contact support",
     chooseLanguage: "Choose your language:",
     languageChanged: "Language set to English.",
@@ -24,9 +24,9 @@ const translations = {
     welcome: "🎉 ወደ ዴሱ ቢንጎ እንኳን በደህና መጡ!\n\nከታች አንዱን ይምረጡ፦",
     about:
       "🎉🔥 እንኳን ወደ ደሱ ቢንጎ (DESU BINGO) በደህና መጡ! 🎮\n\n🎁 እንኳን ደህና መጡ ቦነስ፦ 10 ብር በቀጥታ ወደ አካውንትዎ። እየተዝናኑ የገንዘብ ሽልማት እና የማሸነፍ ዕድልዎን ይሞክሩ!\n 💰 ማን ያውቃል? ምናልባት ዛሬ የእርስዎ የድል ቀን ይሆናል!\n 🌟 ጨዋታውን ይክፈቱ፣ የጨዋታ ክፍልና ካርድ ይምረጡ፣ ካርዱን ያረጋግጡ እና የጨዋታውን ደንቦች በመከተል ይዝናኑ!\n 🚀 DESU BINGO – ዛሬ የማን የድል ቀን ይሆን?",
-    website: "የደሱ ቢንጎ ጨዋታን ይክፈቱ፦",
+    website: "የደሱ ቢንጎ ጨዋታን ይክፈቱ 👇፦",
     websiteUnavailable: "የድረ-ገጹ አድራሻ ገና አልተዋቀረም።",
-    support: "እገዛ ከፈለጉ የድጋፍ ቡድናችንን ያግኙ፦",
+    support: "እገዛ ከፈለጉ የድጋፍ ቡድናችንን ያግኙ 👇፦",
     supportButton: "ድጋፍን ያግኙ",
     chooseLanguage: "ቋንቋዎን ይምረጡ፦",
     languageChanged: "ቋንቋው ወደ አማርኛ ተቀይሯል።",
@@ -120,7 +120,7 @@ function startTelegramBot() {
           await ctx.reply(messages.website, {
             reply_markup: {
               inline_keyboard: [
-                [{ text: "Desu Bingo", url: websiteUrl }],
+                [{ text: "Open Desu Bingo Game", url: websiteUrl }],
               ],
             },
           });

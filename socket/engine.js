@@ -64,7 +64,6 @@ exports.startGameEngine = async (io, room_id) => {
       io.to(`room_${room_id}`).emit("card_updated", {
         user_id: p.user_id,
         card,
-        selected_number: p.selected_number,
       });
 
       // Check if this player wins

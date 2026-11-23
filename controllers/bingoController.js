@@ -391,8 +391,16 @@ exports.selectCard = async (req, res) => {
     return res.status(400).json({ message: "Card number is required" });
 
   try {
+    const [[player]] = await db.query(
+      "SELECT prize FROM bingo_players WHERE room_id = ? AND user_id = ?",
+      [room_id, user_id],
+    );
+    if (player && Number(player.prize) > 0) {
+      return res.status(400).json({ message: "Card is already confirmed." });
+    }
+
     const [taken] = await db.query(
-      "SELECT user_id FROM bingo_players WHERE room_id = ? AND selected_number = ?",
+      "SELECT user_id FROM bingo_players WHERE room_id = ? AND selected_number = ? AND prize > 0",
       [room_id, card_number]
     );
     if (taken.length > 0) {
@@ -409,9 +417,17 @@ exports.selectCard = async (req, res) => {
     await db.query(
       `UPDATE bingo_players
        SET card = ?, marked = ?, selected_number = ?
-       WHERE room_id = ? AND user_id = ?`,
+       WHERE room_id = ? AND user_id = ? AND (prize IS NULL OR prize = 0)`,
       [JSON.stringify(fixedCard), "[]", card_number, room_id, user_id]
     );
+
+    const [[updatedPlayer]] = await db.query(
+      "SELECT prize FROM bingo_players WHERE room_id = ? AND user_id = ?",
+      [room_id, user_id],
+    );
+    if (updatedPlayer && Number(updatedPlayer.prize) > 0) {
+      return res.status(400).json({ message: "Card is already confirmed." });
+    }
 
     res.json({ card: fixedCard });
   } catch (error) {
@@ -427,53 +443,99 @@ exports.confirmCard = async (req, res) => {
   const user_id = req.user.id;
   const { room_id } = req.body;
 
-  const [[room]] = await db.query(
-    "SELECT status, entry_fee FROM bingo_rooms WHERE id=?",
-    [room_id]
-  );
-  if (!room) return res.status(404).json({ message: "Room not found" });
-  if (room.status !== "waiting" && room.status !== "countdown") {
-    return res.status(400).json({
-      message: "Cannot confirm now. Room is not open for joining.",
-    });
+  let connection;
+  let prize;
+  let newConfirmedCount;
+  try {
+    connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    const reject = async (status, message) => {
+      await connection.rollback();
+      return res.status(status).json({ message });
+    };
+
+    const [[room]] = await connection.query(
+      "SELECT status, entry_fee FROM bingo_rooms WHERE id=? FOR UPDATE",
+      [room_id],
+    );
+    if (!room) return await reject(404, "Room not found");
+    if (room.status !== "waiting" && room.status !== "countdown") {
+      return await reject(
+        400,
+        "Cannot confirm now. Room is not open for joining.",
+      );
+    }
+
+    const [[player]] = await connection.query(
+      "SELECT id, prize, selected_number FROM bingo_players WHERE room_id=? AND user_id=? ORDER BY id LIMIT 1 FOR UPDATE",
+      [room_id, user_id],
+    );
+    if (!player || player.selected_number === null) {
+      return await reject(400, "Select a card first.");
+    }
+    if (Number(player.prize) > 0) {
+      return await reject(400, "Already confirmed");
+    }
+
+    const [taken] = await connection.query(
+      `SELECT id FROM bingo_players
+       WHERE room_id = ? AND selected_number = ? AND prize > 0 AND user_id <> ?
+       FOR UPDATE`,
+      [room_id, player.selected_number, user_id],
+    );
+    if (taken.length > 0) {
+      return await reject(
+        400,
+        "Card number already confirmed by another player.",
+      );
+    }
+
+    const [[user]] = await connection.query(
+      "SELECT main_balance FROM users WHERE id=? FOR UPDATE",
+      [user_id],
+    );
+    if (!user) return await reject(404, "User not found");
+
+    const main_balance = Number(user.main_balance);
+    const entry_fee = Number(room.entry_fee);
+    if (main_balance < entry_fee) {
+      return await reject(400, "Insufficient balance");
+    }
+
+    await connection.query(
+      "UPDATE users SET main_balance = main_balance - ? WHERE id=?",
+      [entry_fee, user_id],
+    );
+
+    const [[{ count: playersCount }]] = await connection.query(
+      "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
+      [room_id],
+    );
+
+    const totalPool = entry_fee * (Number(playersCount) + 1);
+    const platformFee = totalPool * 0.2;
+    prize = totalPool - platformFee;
+
+    await connection.query(
+      "UPDATE bingo_players SET prize=? WHERE id=?",
+      [prize, player.id],
+    );
+
+    const [[{ count }]] = await connection.query(
+      "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
+      [room_id],
+    );
+    newConfirmedCount = Number(count);
+
+    await connection.commit();
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error("confirmCard error:", error);
+    return res.status(500).json({ message: "Server error" });
+  } finally {
+    if (connection) connection.release();
   }
-
-  const [[player]] = await db.query(
-    "SELECT prize FROM bingo_players WHERE room_id=? AND user_id=?",
-    [room_id, user_id]
-  );
-  if (player && player.prize > 0) {
-    return res.status(400).json({ message: "Already confirmed" });
-  }
-
-  const [[user]] = await db.query(
-    "SELECT main_balance FROM users WHERE id=?",
-    [user_id]
-  );
-  const main_balance = Number(user.main_balance);
-  const entry_fee = Number(room.entry_fee);
-  if (main_balance < entry_fee) {
-    return res.status(400).json({ message: "Insufficient balance" });
-  }
-
-  await db.query(
-    "UPDATE users SET main_balance = main_balance - ? WHERE id=?",
-    [entry_fee, user_id]
-  );
-
-  const [[{ count: playersCount }]] = await db.query(
-    "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
-    [room_id]
-  );
-
-  const totalPool = entry_fee * (playersCount + 1);
-  const platformFee = totalPool * 0.2;
-  const prize = totalPool - platformFee;
-
-  await db.query(
-    "UPDATE bingo_players SET prize=? WHERE room_id=? AND user_id=?",
-    [prize, room_id, user_id]
-  );
 
   // 8. Emit prize update to the room
   if (req.io) {
@@ -481,12 +543,9 @@ exports.confirmCard = async (req, res) => {
   }
 
   // 9. Emit updated confirmed player count
-  const [[{ count: newConfirmedCount }]] = await db.query(
-    "SELECT COUNT(*) AS count FROM bingo_players WHERE room_id=? AND prize > 0",
-    [room_id]
-  );
   if (req.io) {
     req.io.to(`room_${room_id}`).emit("confirmed_player_count", newConfirmedCount);
+    req.io.to(`room_${room_id}`).emit("player_selected_card");
   }
 
   res.json({ message: "Confirmed", prize });
@@ -528,7 +587,7 @@ exports.getTakenNumbers = async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      "SELECT selected_number FROM bingo_players WHERE room_id = ? AND selected_number IS NOT NULL",
+      "SELECT selected_number FROM bingo_players WHERE room_id = ? AND selected_number IS NOT NULL AND prize > 0",
       [room_id]
     );
 

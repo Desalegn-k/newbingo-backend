@@ -138,9 +138,10 @@ exports.startCountdown = async (req, res) => {
 
         if (confirmedCount >= 2) {
           // Enough players – start the game
-          await db.query("UPDATE bingo_rooms SET status='started' WHERE id=?", [
-            room_id,
-          ]);
+          await db.query(
+            "UPDATE bingo_rooms SET status='started', started_at=COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id=?",
+            [room_id],
+          );
 
           io.to(`room_${room_id}`).emit("countdown_finished", { room_id });
 
@@ -183,7 +184,7 @@ exports.startCountdown = async (req, res) => {
                 if (finalCount >= 2) {
                   // Enough players now – start game
                   await db.query(
-                    "UPDATE bingo_rooms SET status='started' WHERE id=?",
+                    "UPDATE bingo_rooms SET status='started', started_at=COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id=?",
                     [room_id],
                   );
                   io.to(`room_${room_id}`).emit("countdown_finished", {
@@ -590,6 +591,81 @@ exports.getRoomState = async (req, res) => {
   );
 
   res.json({ room, players });
+};
+
+exports.getRoomHistory = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT
+         r.id AS room_id,
+         r.room_name,
+         r.status,
+         r.entry_fee,
+         r.started_at,
+         r.ended_at,
+         COALESCE(payout.total_pool, player_totals.player_count * r.entry_fee, 0) AS total,
+         COALESCE(payout.platform_fee, player_totals.player_count * r.entry_fee * 0.2, 0) AS fee,
+         COALESCE(payout.prize_amount, player_totals.current_prize, 0) AS prize,
+         bp.id AS player_id,
+         u.username AS player_name,
+         bp.selected_number AS card_number,
+         bp.prize > 0 AS confirmed,
+         bp.is_winner
+       FROM bingo_rooms r
+       LEFT JOIN bingo_players bp ON bp.room_id = r.id
+       LEFT JOIN users u ON u.id = bp.user_id
+       LEFT JOIN (
+         SELECT room_id, COUNT(*) AS player_count, MAX(prize) AS current_prize
+         FROM bingo_players
+         WHERE prize > 0
+         GROUP BY room_id
+       ) player_totals ON player_totals.room_id = r.id
+       LEFT JOIN (
+         SELECT
+           room_id,
+           MAX(total_pool) AS total_pool,
+           MAX(platform_fee) AS platform_fee,
+           MAX(prize_amount) AS prize_amount
+         FROM bingo_payouts
+         GROUP BY room_id
+       ) payout ON payout.room_id = r.id
+       ORDER BY r.id DESC, bp.id ASC`,
+    );
+
+    const rooms = new Map();
+    for (const row of rows) {
+      if (!rooms.has(row.room_id)) {
+        rooms.set(row.room_id, {
+          room_id: row.room_id,
+          room_name: row.room_name,
+          status: row.status,
+          entry_fee: row.entry_fee,
+          total: row.total,
+          fee: row.fee,
+          prize: row.prize,
+          started_at: row.started_at,
+          ended_at: row.ended_at,
+          players: [],
+          winner_name: null,
+        });
+      }
+
+      const room = rooms.get(row.room_id);
+      if (row.player_id) {
+        room.players.push({
+          name: row.player_name,
+          card_number: row.card_number,
+          confirmed: Number(row.confirmed) === 1,
+        });
+        if (Number(row.is_winner) === 1) room.winner_name = row.player_name;
+      }
+    }
+
+    res.json(Array.from(rooms.values()));
+  } catch (error) {
+    console.error("getRoomHistory error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
 };
 
 exports.getMyActiveGame = async (req, res) => {

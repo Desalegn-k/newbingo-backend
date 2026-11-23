@@ -1,0 +1,3 @@
+ALTER TABLE bingo_rooms
+  ADD COLUMN started_at DATETIME NULL,
+  ADD COLUMN ended_at DATETIME NULL;

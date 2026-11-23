@@ -163,9 +163,10 @@ async function endGame(io, room_id) {
   delete activeGames[room_id];
 
   // Mark room as finished in the database
-  await db.query("UPDATE bingo_rooms SET status='finished' WHERE id = ?", [
-    room_id,
-  ]);
+  await db.query(
+    "UPDATE bingo_rooms SET status='finished', ended_at=CURRENT_TIMESTAMP WHERE id = ?",
+    [room_id],
+  );
 
   // Notify all players in the room that the game has finished
   io.to(`room_${room_id}`).emit(`room_${room_id}_finished`);

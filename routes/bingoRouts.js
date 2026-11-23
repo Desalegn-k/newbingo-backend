@@ -7,7 +7,7 @@ const bingo = require("../controllers/bingoController");
 
 // (IF you use auth) — uncomment when needed
 const { verifyToken } = require("../middleware/authMiddleware");
-const {verifyadmin}=require("../middleware/verifyAdmin");
+const verifyAdmin = require("../middleware/verifyAdmin");
 
 // PUBLIC ROUTES (no auth needed)
 // Create room (admin can hit this)
@@ -38,6 +38,9 @@ router.post("/confirm-card", verifyToken, bingo.confirmCard);
 // router.post("/confirm-card", bingo.confirmCard);
 router.get("/taken/:room_id", bingo.getTakenNumbers);
 router.get("/prize/:roomId", bingo.getPrize);
+
+// Admin room history
+router.get("/admin/history", verifyToken, verifyAdmin, bingo.getRoomHistory);
 
 // Get room state
 router.get("/state", bingo.getRoomState);

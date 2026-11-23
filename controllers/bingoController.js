@@ -421,10 +421,6 @@ exports.selectCard = async (req, res) => {
       "SELECT id, selected_number, prize FROM bingo_players WHERE room_id = ? AND user_id = ? ORDER BY id",
       [room_id, user_id],
     );
-    if (playerRows.some((player) => Number(player.prize) > 0)) {
-      return await reject(400, "Cards are already confirmed.");
-    }
-
     const selectedCards = playerRows.filter(
       (player) => player.selected_number !== null,
     );
@@ -482,7 +478,7 @@ exports.selectCard = async (req, res) => {
 
 exports.confirmCard = async (req, res) => {
   const user_id = req.user.id;
-  const { room_id } = req.body;
+  const { room_id, card_number } = req.body;
 
   let connection;
   let prize;
@@ -508,18 +504,34 @@ exports.confirmCard = async (req, res) => {
       );
     }
 
-    const [players] = await connection.query(
-      "SELECT id, prize FROM bingo_players WHERE room_id=? AND user_id=? AND selected_number IS NOT NULL FOR UPDATE",
+    const [selectedCards] = await connection.query(
+      "SELECT id, prize, selected_number FROM bingo_players WHERE room_id=? AND user_id=? AND selected_number IS NOT NULL FOR UPDATE",
       [room_id, user_id],
     );
-    if (players.length === 0) {
+    if (selectedCards.length === 0) {
       return await reject(400, "Select at least one card first.");
     }
-    if (players.length > 2) {
+    if (selectedCards.length > 2) {
       return await reject(400, "Maximum 2 cards per round.");
     }
-    if (players.some((player) => Number(player.prize) > 0)) {
-      return await reject(400, "Already confirmed");
+
+    let players;
+    if (card_number !== undefined && card_number !== null) {
+      const card = selectedCards.find(
+        (player) => String(player.selected_number) === String(card_number),
+      );
+      if (!card) {
+        return await reject(400, "Card is not selected for this room.");
+      }
+      if (Number(card.prize) > 0) {
+        return await reject(400, "Already confirmed");
+      }
+      players = [card];
+    } else {
+      players = selectedCards.filter((player) => Number(player.prize) <= 0);
+      if (players.length === 0) {
+        return await reject(400, "Already confirmed");
+      }
     }
 
     const [[user]] = await connection.query(
@@ -550,8 +562,8 @@ exports.confirmCard = async (req, res) => {
     prize = totalPool - platformFee;
 
     await connection.query(
-      "UPDATE bingo_players SET prize=? WHERE room_id=? AND user_id=? AND selected_number IS NOT NULL",
-      [prize, room_id, user_id],
+      "UPDATE bingo_players SET prize=? WHERE id IN (?)",
+      [prize, players.map((player) => player.id)],
     );
 
     const [[{ count }]] = await connection.query(

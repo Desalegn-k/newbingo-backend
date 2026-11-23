@@ -1,4 +1,8 @@
 
+# Dependencies
 node_modules/
+.node_moduls/
+
+# Environment variables
 .env
-.env.example
+.env.*

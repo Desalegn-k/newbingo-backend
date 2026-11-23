@@ -629,7 +629,8 @@ exports.getRoomHistory = async (req, res) => {
          FROM bingo_payouts
          GROUP BY room_id
        ) payout ON payout.room_id = r.id
-       ORDER BY r.id DESC, bp.id ASC`,
+       WHERE r.status = 'finished'
+       ORDER BY r.ended_at DESC, r.id DESC, bp.id ASC`,
     );
 
     const rooms = new Map();

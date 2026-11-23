@@ -424,15 +424,26 @@ exports.selectCard = async (req, res) => {
     const selectedCards = playerRows.filter(
       (player) => player.selected_number !== null,
     );
-    if (selectedCards.length >= 2) {
+    const confirmedCards = selectedCards.filter(
+      (player) => Number(player.prize) > 0,
+    );
+    const pendingCard = selectedCards.find(
+      (player) => Number(player.prize) <= 0,
+    );
+    if (confirmedCards.length >= 2 || (selectedCards.length >= 2 && !pendingCard)) {
       return await reject(400, "Maximum 2 cards per round.");
     }
 
     const [taken] = await connection.query(
-      "SELECT user_id FROM bingo_players WHERE room_id = ? AND selected_number = ?",
+      "SELECT user_id, prize FROM bingo_players WHERE room_id = ? AND selected_number = ?",
       [room_id, card_number],
     );
-    if (taken.length > 0) {
+    const takenByAnotherPlayerOrConfirmed = taken.some(
+      (player) =>
+        String(player.user_id) !== String(user_id) ||
+        Number(player.prize) > 0,
+    );
+    if (takenByAnotherPlayerOrConfirmed) {
       return await reject(400, "Card number already taken!");
     }
 
@@ -444,15 +455,15 @@ exports.selectCard = async (req, res) => {
       return await reject(404, "Card not found");
 
     const fixedCard = JSON.parse(rows[0].card);
-    const unusedPlayerRow = playerRows.find(
-      (player) => player.selected_number === null,
-    );
-    if (unusedPlayerRow) {
+    const rowToUpdate =
+      pendingCard ||
+      playerRows.find((player) => player.selected_number === null);
+    if (rowToUpdate) {
       await connection.query(
         `UPDATE bingo_players
          SET card = ?, marked = ?, selected_number = ?
          WHERE id = ?`,
-        [JSON.stringify(fixedCard), "[]", card_number, unusedPlayerRow.id],
+        [JSON.stringify(fixedCard), "[]", card_number, rowToUpdate.id],
       );
     } else {
       await connection.query(
@@ -463,6 +474,9 @@ exports.selectCard = async (req, res) => {
     }
 
     await connection.commit();
+    if (req.io) {
+      req.io.to(`room_${room_id}`).emit("player_selected_card");
+    }
     res.json({ card: fixedCard });
   } catch (error) {
     if (connection) await connection.rollback();

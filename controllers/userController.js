@@ -1,10 +1,14 @@
 
 const db = require("../config/db");
-
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel");
 const { sendOtpEmail } = require("../utils/emailService");
+const {
+  getTelegramRegistrationByToken,
+  hashToken,
+} = require("../utils/telegramRegistration");
+const { validatePhoneByCountry } = require("../utils/phoneValidation");
 
 // 1️⃣ Send OTP
 // const { sendOTP } = require("../utils/otpSender");
@@ -43,47 +47,33 @@ const { sendOtpEmail } = require("../utils/emailService");
  
 
 // ----------------------------------------------------------------------
-// Phone validation helper (country‑specific)
-// ----------------------------------------------------------------------
-function validatePhoneByCountry(fullPhone) {
-  const countryRules = {
-    "+251": { length: 9, firstDigit: "9" }, // Ethiopia – 9 digits, must start with 9
-    "+1":   { length: 10 },                 // USA/Canada – 10 digits
-    "+44":  { length: 10 },                 // UK – 10 digits (excluding leading 0)
-    "+254": { length: 9 },                  // Kenya – 9 digits
-    "+255": { length: 9 },                  // Tanzania – 9 digits
-    "+256": { length: 9 },                  // Uganda – 9 digits
-  };
-
-  const matchedCode = Object.keys(countryRules).find(code => fullPhone.startsWith(code));
-  if (!matchedCode) {
-    // Unknown country code – fallback to generic 10‑15 digit (with optional +)
-    const genericRegex = /^\+?[0-9]{10,15}$/;
-    return genericRegex.test(fullPhone);
-  }
-
-  const rule = countryRules[matchedCode];
-  const localNumber = fullPhone.slice(matchedCode.length);
-
-  if (!/^\d+$/.test(localNumber)) return false;
-  if (localNumber.length !== rule.length) return false;
-  if (rule.firstDigit && localNumber[0] !== rule.firstDigit) return false;
-
-  return true;
-}
-
-// ----------------------------------------------------------------------
 // Register new user
 // ----------------------------------------------------------------------
 exports.register = async (req, res) => {
+  let connection;
+  let transactionStarted = false;
+
   try {
-    const { username, phone, email, password } = req.body;
+    const {
+      username,
+      phone: submittedPhone,
+      email,
+      password,
+      telegram_token: telegramToken,
+    } = req.body;
+    let phone = submittedPhone;
     const normalizedEmail =
       typeof email === "string" && email.trim()
         ? email.trim().toLowerCase()
         : null;
 
-    if (!username || !phone || !password)
+    if (
+      typeof username !== "string" ||
+      !username.trim() ||
+      typeof password !== "string" ||
+      !password ||
+      (!telegramToken && !phone)
+    )
       return res.status(400).json({ message: "All fields required" });
 
     if (
@@ -94,26 +84,69 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: "Invalid email address" });
     }
 
+    let queryExecutor = db;
+    if (telegramToken) {
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+      transactionStarted = true;
+      queryExecutor = connection;
+
+      const registration = await getTelegramRegistrationByToken(
+        telegramToken,
+        connection,
+        true,
+      );
+      if (!registration) {
+        await connection.rollback();
+        transactionStarted = false;
+        return res.status(400).json({
+          message: "Telegram registration link is invalid or has expired.",
+        });
+      }
+
+      phone = registration.phone;
+      if (submittedPhone && submittedPhone !== phone) {
+        await connection.rollback();
+        transactionStarted = false;
+        return res.status(400).json({
+          message: "The phone number does not match the verified Telegram contact.",
+        });
+      }
+    }
+
     // ---- Phone validation ----
-    if (!validatePhoneByCountry(phone)) {
+    if (typeof phone !== "string" || !validatePhoneByCountry(phone)) {
+      if (transactionStarted) {
+        await connection.rollback();
+        transactionStarted = false;
+      }
       return res.status(400).json({
         message: "Invalid phone number format for the selected country.",
       });
     }
 
     // Check if phone already exists
-    const [existingUsers] = await db.query(
+    const [existingUsers] = await queryExecutor.query(
       "SELECT phone, email FROM users WHERE phone = ? OR (? IS NOT NULL AND LOWER(email) = ?)",
       [phone, normalizedEmail, normalizedEmail],
     );
-    if (existingUsers.some((user) => String(user.phone) === String(phone)))
+    if (existingUsers.some((user) => String(user.phone) === String(phone))) {
+      if (transactionStarted) {
+        await connection.rollback();
+        transactionStarted = false;
+      }
       return res.status(400).json({ message: "Phone already registered" });
+    }
     if (
       normalizedEmail &&
       existingUsers.some(
         (user) => user.email?.toLowerCase() === normalizedEmail,
       )
     ) {
+      if (transactionStarted) {
+        await connection.rollback();
+        transactionStarted = false;
+      }
       return res.status(400).json({ message: "Email already registered" });
     }
 
@@ -133,10 +166,28 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Insert user
-    await db.query(
+    await queryExecutor.query(
       "INSERT INTO users (username, phone, email, password, otp, referral_code, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?)",
       [username, phone, normalizedEmail, hashedPassword, null, referralCode, 1],
     );
+
+    if (telegramToken) {
+      const [tokenUpdate] = await connection.query(
+        `UPDATE telegram_registration_tokens
+         SET used_at = UTC_TIMESTAMP()
+         WHERE token_hash = ? AND used_at IS NULL AND expires_at > UTC_TIMESTAMP()`,
+        [hashToken(telegramToken)],
+      );
+      if (tokenUpdate.affectedRows !== 1) {
+        await connection.rollback();
+        transactionStarted = false;
+        return res.status(400).json({
+          message: "Telegram registration link is invalid or has expired.",
+        });
+      }
+      await connection.commit();
+      transactionStarted = false;
+    }
 
     res.status(200).json({
       success: true,
@@ -145,8 +196,35 @@ exports.register = async (req, res) => {
       email: normalizedEmail,
     });
   } catch (error) {
+    if (transactionStarted && connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error("Telegram registration rollback failed:", rollbackError);
+      }
+    }
     console.error("❌ Registration Error:", error);
     res.status(500).json({ message: "Server error" });
+  } finally {
+    if (connection) connection.release();
+  }
+};
+
+exports.getTelegramRegistration = async (req, res) => {
+  try {
+    const registration = await getTelegramRegistrationByToken(
+      req.body?.token,
+    );
+    if (!registration) {
+      return res.status(400).json({
+        message: "Telegram registration link is invalid or has expired.",
+      });
+    }
+
+    return res.json({ phone: registration.phone });
+  } catch (error) {
+    console.error("Telegram registration token lookup failed:", error);
+    return res.status(500).json({ message: "Unable to verify registration link." });
   }
 };
 

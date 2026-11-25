@@ -6,6 +6,7 @@ const { verifyToken } = require("../middleware/authMiddleware");
 const {
   // sendOTP,
   register,
+  getTelegramRegistration,
   verifyOTP,
   login,
   getProfile,
@@ -19,6 +20,7 @@ const verifyAdmin = require("../middleware/verifyAdmin");
 
 // router.post("/send-otp", sendOTP);
 router.post("/register", register);
+router.post("/telegram-registration/verify", getTelegramRegistration);
 router.post("/verify-otp", verifyOTP);
 router.post("/login", login);
 //to get user data from the table

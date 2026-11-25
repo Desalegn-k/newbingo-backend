@@ -45,6 +45,7 @@ router.get("/admin/history", verifyToken, verifyAdmin, bingo.getRoomHistory);
 // Get room state
 router.get("/state", bingo.getRoomState);
 router.get("/my-active-game", verifyToken, bingo.getMyActiveGame);
+router.get("/my-history", verifyToken, bingo.getMyHistory);
 
 // Claim bingo
 router.post("/claim", verifyToken, bingo.claimBingo);

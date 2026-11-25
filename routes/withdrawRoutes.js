@@ -4,6 +4,7 @@ const withdrawController = require("../controllers/withdrawController");
 const { verifyToken } = require("../middleware/authMiddleware");
 
 router.post("/direct", withdrawController.directWithdraw);
+router.get("/history", verifyToken, withdrawController.getMyWithdrawHistory);
 router.post(
   "/manual/request",
   verifyToken,

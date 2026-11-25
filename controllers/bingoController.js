@@ -731,6 +731,34 @@ exports.getMyActiveGame = async (req, res) => {
   }
 };
 
+exports.getMyHistory = async (req, res) => {
+  try {
+    const [games] = await db.query(
+      `SELECT
+         r.id AS room_id,
+         r.room_name,
+         r.entry_fee,
+         r.ended_at,
+         bp.is_winner,
+         COALESCE(payout.prize_amount, 0) AS winnings
+       FROM bingo_players bp
+       JOIN bingo_rooms r ON r.id = bp.room_id
+       LEFT JOIN bingo_payouts payout
+         ON payout.room_id = r.id AND payout.winner_user_id = bp.user_id
+       WHERE bp.user_id = ?
+         AND bp.prize > 0
+         AND r.status = 'finished'
+       ORDER BY r.ended_at DESC, r.id DESC`,
+      [req.user.id],
+    );
+
+    res.json(games);
+  } catch (error) {
+    console.error("getMyHistory error:", error);
+    res.status(500).json({ message: "Unable to load game history" });
+  }
+};
+
 // ------------------------------------------------------
 // CLAIM BINGO
 // ------------------------------------------------------

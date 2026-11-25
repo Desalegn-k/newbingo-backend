@@ -269,3 +269,19 @@ exports.getPendingDeposits = async (req, res) => {
     res.status(500).json({ msg: "Server error" });
   }
 };
+
+exports.getMyDepositHistory = async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT id, amount, method, status, external_ref, created_at
+       FROM transactions
+       WHERE user_id = ? AND type = 'deposit'
+       ORDER BY created_at DESC, id DESC`,
+      [req.user.id],
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error("getMyDepositHistory error:", error);
+    res.status(500).json({ msg: "Unable to load deposit history" });
+  }
+};

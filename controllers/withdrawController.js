@@ -78,6 +78,43 @@ exports.getManualWithdraws = async (req, res) => {
   } 
 };
 
+exports.getMyWithdrawHistory = async (req, res) => {
+  try {
+    const [[user]] = await db.query("SELECT phone FROM users WHERE id = ?", [
+      req.user.id,
+    ]);
+
+    if (!user) return res.status(404).json({ msg: "User not found" });
+
+    const [directWithdraws] = await db.query(
+      `SELECT id, amount, method, status, created_at, 'direct' AS withdrawal_type
+       FROM direct_withdraws
+       WHERE phone = ?
+       ORDER BY created_at DESC, id DESC`,
+      [user.phone],
+    );
+    const [manualWithdraws] = await db.query(
+      `SELECT id, amount, bank AS method, status, created_at, 'bank' AS withdrawal_type
+       FROM manual_withdraw_requests
+       WHERE user_phone = ?
+       ORDER BY created_at DESC, id DESC`,
+      [user.phone],
+    );
+
+    const withdrawals = [...directWithdraws, ...manualWithdraws]
+      .map((withdrawal) => ({
+        ...withdrawal,
+        status: withdrawal.status === "verified" ? "success" : withdrawal.status,
+      }))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    res.json(withdrawals);
+  } catch (error) {
+    console.error("getMyWithdrawHistory error:", error);
+    res.status(500).json({ msg: "Unable to load withdrawal history" });
+  }
+};
+
 exports.requestManualWithdraw = async (req, res) => {
   const { amount, bank, accountNumber, accountHolder, password } = req.body;
   const withdrawAmount = Number(amount);

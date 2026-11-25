@@ -5,6 +5,7 @@ const depositController = require("../controllers/depositController");
 const verifyAdmin = require("../middleware/verifyAdmin");
 
 router.post("/create", verifyToken, depositController.deposit);
+router.get("/history", verifyToken, depositController.getMyDepositHistory);
 router.post(
   "/confirm",
   verifyToken,verifyAdmin,
